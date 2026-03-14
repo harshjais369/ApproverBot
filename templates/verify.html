@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Group Verification</title>
+    <script src="https://telegram.org/js/telegram-web-app.js?61"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 24px;
+        }
+        .container {
+            text-align: center;
+            max-width: 360px;
+            width: 100%;
+        }
+        .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        .title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            font-size: 14px;
+            color: var(--tg-theme-hint-color, #999999);
+            line-height: 1.5;
+            margin-bottom: 24px;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--tg-theme-hint-color, #cccccc);
+            border-top-color: var(--tg-theme-button-color, #3390ec);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 16px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .status {
+            font-size: 14px;
+            color: var(--tg-theme-hint-color, #999999);
+        }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Loading state -->
+        <div id="loading">
+            <div class="spinner"></div>
+            <p class="status">Preparing verification...</p>
+        </div>
+
+        <!-- Ready state -->
+        <div id="ready" class="hidden">
+            <div class="icon">&#128274;</div>
+            <div class="title">Verify Your Identity</div>
+            <p class="subtitle">Tap the button below to complete verification and join the group.</p>
+        </div>
+
+        <!-- Result state -->
+        <div id="result" class="hidden">
+            <div class="icon" id="result-icon"></div>
+            <div class="title" id="result-title"></div>
+            <p class="subtitle" id="result-text"></p>
+        </div>
+    </div>
+
+    <script>
+        const TOKEN = "{{ token }}";
+        const API_URL = "{{ api_url }}";
+        const tg = window.Telegram.WebApp;
+
+        tg.ready();
+        tg.expand();
+        tg.disableVerticalSwipes();
+
+        // ═══════════════════════════════════════════════════════════
+        //  FINGERPRINT COLLECTION
+        // ═══════════════════════════════════════════════════════════
+
+        async function sha256(str) {
+            const buf = await crypto.subtle.digest(
+                "SHA-256",
+                new TextEncoder().encode(str)
+            );
+            return Array.from(new Uint8Array(buf))
+                .map(b => b.toString(16).padStart(2, "0"))
+                .join("");
+        }
+
+        // ── localStorage persistent device ID ────────────────────
+        function getOrCreateDeviceId() {
+            const KEY = "__ab_dvid";
+            try {
+                let id = localStorage.getItem(KEY);
+                if (!id) {
+                    id = crypto.randomUUID
+                        ? crypto.randomUUID()
+                        : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+                              /[xy]/g,
+                              c => {
+                                  const r = (Math.random() * 16) | 0;
+                                  return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+                              }
+                          );
+                    localStorage.setItem(KEY, id);
+                }
+                return id;
+            } catch {
+                return "";
+            }
+        }
+
+        // ── Canvas fingerprint ───────────────────────────────────
+        async function getCanvasHash() {
+            try {
+                const canvas = document.createElement("canvas");
+                canvas.width = 280;
+                canvas.height = 60;
+                const ctx = canvas.getContext("2d");
+                if (!ctx) return "";
+
+                // Text with specific font stack
+                ctx.textBaseline = "alphabetic";
+                ctx.font = "14px 'Arial'";
+                ctx.fillStyle = "#f60";
+                ctx.fillRect(125, 1, 62, 20);
+                ctx.fillStyle = "#069";
+                ctx.fillText("Cwm fjordbank glyphs vext quiz, \ud83d\ude03", 2, 15);
+                ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
+                ctx.font = "18px 'Times New Roman'";
+                ctx.fillText("Cwm fjordbank glyphs vext quiz, \ud83d\ude03", 4, 45);
+
+                // Geometric shapes
+                ctx.globalCompositeOperation = "multiply";
+                ctx.fillStyle = "rgb(255,0,255)";
+                ctx.beginPath();
+                ctx.arc(50, 50, 50, 0, Math.PI * 2, true);
+                ctx.closePath();
+                ctx.fill();
+                ctx.fillStyle = "rgb(0,255,255)";
+                ctx.beginPath();
+                ctx.arc(100, 50, 50, 0, Math.PI * 2, true);
+                ctx.closePath();
+                ctx.fill();
+                ctx.fillStyle = "rgb(255,255,0)";
+                ctx.beginPath();
+                ctx.arc(75, 100, 50, 0, Math.PI * 2, true);
+                ctx.closePath();
+                ctx.fill();
+
+                return await sha256(canvas.toDataURL());
+            } catch {
+                return "";
+            }
+        }
+
+        // ── WebGL fingerprint ────────────────────────────────────
+        async function getWebGLHash() {
+            try {
+                const canvas = document.createElement("canvas");
+                const gl =
+                    canvas.getContext("webgl") ||
+                    canvas.getContext("experimental-webgl");
+                if (!gl) return "";
+
+                const dbgInfo = gl.getExtension("WEBGL_debug_renderer_info");
+                const renderer = dbgInfo
+                    ? gl.getParameter(dbgInfo.UNMASKED_RENDERER_WEBGL)
+                    : "";
+                const vendor = dbgInfo
+                    ? gl.getParameter(dbgInfo.UNMASKED_VENDOR_WEBGL)
+                    : "";
+
+                const data = [
+                    renderer,
+                    vendor,
+                    gl.getParameter(gl.VERSION),
+                    gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+                    gl.getParameter(gl.MAX_TEXTURE_SIZE),
+                    gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+                    gl.getParameter(gl.MAX_VIEWPORT_DIMS)?.toString(),
+                    gl.getParameter(gl.MAX_VERTEX_ATTRIBS),
+                    gl.getParameter(gl.MAX_VERTEX_UNIFORM_VECTORS),
+                    gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS),
+                    gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE)?.toString(),
+                    gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)?.toString(),
+                    gl.getSupportedExtensions()?.join(","),
+                ].join("|");
+
+                return await sha256(data);
+            } catch {
+                return "";
+            }
+        }
+
+        // ── Audio fingerprint ────────────────────────────────────
+        async function getAudioHash() {
+            try {
+                const AudioCtx =
+                    window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (!AudioCtx) return "";
+
+                const ctx = new AudioCtx(1, 44100, 44100);
+                const oscillator = ctx.createOscillator();
+                oscillator.type = "triangle";
+                oscillator.frequency.setValueAtTime(10000, ctx.currentTime);
+
+                const compressor = ctx.createDynamicsCompressor();
+                compressor.threshold.setValueAtTime(-50, ctx.currentTime);
+                compressor.knee.setValueAtTime(40, ctx.currentTime);
+                compressor.ratio.setValueAtTime(12, ctx.currentTime);
+                compressor.attack.setValueAtTime(0, ctx.currentTime);
+                compressor.release.setValueAtTime(0.25, ctx.currentTime);
+
+                oscillator.connect(compressor);
+                compressor.connect(ctx.destination);
+                oscillator.start(0);
+
+                const buffer = await ctx.startRendering();
+                const samples = buffer.getChannelData(0).slice(4500, 5000);
+                let sum = 0;
+                for (let i = 0; i < samples.length; i++) {
+                    sum += Math.abs(samples[i]);
+                }
+                return await sha256(sum.toString());
+            } catch {
+                return "";
+            }
+        }
+
+        // ── Font detection ───────────────────────────────────────
+        async function getFontsHash() {
+            try {
+                const baseFonts = ["monospace", "sans-serif", "serif"];
+                const testFonts = [
+                    "Arial", "Arial Black", "Calibri", "Cambria", "Comic Sans MS",
+                    "Consolas", "Courier New", "Georgia", "Helvetica", "Impact",
+                    "Lucida Console", "Lucida Sans", "Microsoft Sans Serif",
+                    "Palatino Linotype", "Segoe UI", "Tahoma", "Times New Roman",
+                    "Trebuchet MS", "Verdana", "Roboto", "Noto Sans",
+                    "Ubuntu", "Cantarell", "Droid Sans", "Fira Sans",
+                    "Open Sans", "Lato", "Source Sans Pro",
+                ];
+
+                const testString = "mmmmmmmmmmlli";
+                const testSize = "72px";
+                const canvas = document.createElement("canvas");
+                const ctx = canvas.getContext("2d");
+                if (!ctx) return "";
+
+                // Measure base widths
+                const baseWidths = {};
+                for (const base of baseFonts) {
+                    ctx.font = `${testSize} ${base}`;
+                    baseWidths[base] = ctx.measureText(testString).width;
+                }
+
+                const detected = [];
+                for (const font of testFonts) {
+                    let found = false;
+                    for (const base of baseFonts) {
+                        ctx.font = `${testSize} '${font}', ${base}`;
+                        const width = ctx.measureText(testString).width;
+                        if (width !== baseWidths[base]) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (found) detected.push(font);
+                }
+
+                return await sha256(detected.sort().join(","));
+            } catch {
+                return "";
+            }
+        }
+
+        // ── Screen resolution ────────────────────────────────────
+        function getScreenResolution() {
+            return `${screen.width}x${screen.height}x${screen.colorDepth}x${screen.pixelDepth}`;
+        }
+
+        // ── Collect all ──────────────────────────────────────────
+        async function collectFingerprint() {
+            const [canvasHash, webglHash, audioHash, fontsHash] =
+                await Promise.all([
+                    getCanvasHash(),
+                    getWebGLHash(),
+                    getAudioHash(),
+                    getFontsHash(),
+                ]);
+
+            return {
+                deviceId: getOrCreateDeviceId(),
+                canvasHash,
+                webglHash,
+                audioHash,
+                screenResolution: getScreenResolution(),
+                platform:
+                    (navigator.platform || "") + "|" + (tg.platform || ""),
+                languages: navigator.languages
+                    ? Array.from(navigator.languages)
+                    : [navigator.language || ""],
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+                timezoneOffset: new Date().getTimezoneOffset(),
+                touchPoints: navigator.maxTouchPoints || 0,
+                deviceMemory: navigator.deviceMemory || null,
+                hardwareConcurrency: navigator.hardwareConcurrency || null,
+                fontsHash,
+            };
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  MAIN FLOW
+        // ═══════════════════════════════════════════════════════════
+
+        function showState(id) {
+            document.getElementById("loading").classList.add("hidden");
+            document.getElementById("ready").classList.add("hidden");
+            document.getElementById("result").classList.add("hidden");
+            document.getElementById(id).classList.remove("hidden");
+        }
+
+        function showResult(icon, title, text) {
+            document.getElementById("result-icon").textContent = icon;
+            document.getElementById("result-title").textContent = title;
+            document.getElementById("result-text").textContent = text;
+            showState("result");
+        }
+
+        collectFingerprint()
+            .then(fp => {
+                showState("ready");
+
+                tg.MainButton.setText("Confirm & Join");
+                tg.MainButton.show();
+
+                tg.MainButton.onClick(async () => {
+                    tg.MainButton.showProgress(false);
+                    tg.MainButton.disable();
+
+                    try {
+                        const resp = await fetch(API_URL + "/api/verify", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                token: TOKEN,
+                                initData: tg.initData,
+                                fingerprint: fp,
+                            }),
+                        });
+
+                        const result = await resp.json();
+
+                        if (result.ok && result.status === "approved") {
+                            showResult(
+                                "\u2705",
+                                "Verified!",
+                                "You've been approved. Welcome to the group!"
+                            );
+                        } else if (result.ok && result.status === "flagged") {
+                            showResult(
+                                "\u23f3",
+                                "Under Review",
+                                "Your request is being reviewed by an admin."
+                            );
+                        } else {
+                            showResult(
+                                "\u274c",
+                                "Verification Failed",
+                                result.error || "Something went wrong. Please try again."
+                            );
+                        }
+                    } catch {
+                        showResult(
+                            "\u274c",
+                            "Network Error",
+                            "Could not reach the server. Please try again."
+                        );
+                    } finally {
+                        tg.MainButton.hideProgress();
+                        tg.MainButton.hide();
+                        setTimeout(() => tg.close(), 2500);
+                    }
+                });
+            })
+            .catch(() => {
+                showResult(
+                    "\u26a0\ufe0f",
+                    "Unavailable",
+                    "Verification is temporarily unavailable. Please try again later."
+                );
+            });
+    </script>
+</body>
+</html>
