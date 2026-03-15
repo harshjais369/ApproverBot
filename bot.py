@@ -2,6 +2,7 @@ import json
 import uuid
 import threading
 import logging
+from time import sleep
 from datetime import datetime, timedelta
 
 import telebot
@@ -14,6 +15,7 @@ from telebot.types import (
 from flask import Flask, request, render_template, jsonify
 
 import config
+from config import SUPERUSERS
 import database
 import fingerprint as fp_module
 import validation
@@ -23,6 +25,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger("approverbot")
+
+# Silence noisy loggers
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("TeleBot").setLevel(logging.WARNING)
 
 bot = telebot.TeleBot(config.BOT_TOKEN)
 app = Flask(__name__)
@@ -41,58 +48,127 @@ def handle_start(message):
     """
     user_id = message.from_user.id
     first_name = message.from_user.first_name or "there"
-
     # Check for any restricted (un-verified) pending requests
     restricted = database.get_restricted_requests(user_id)
     if restricted:
         for req in restricted:
             token = uuid.uuid4().hex
-            expires_at = (
-                datetime.utcnow()
-                + timedelta(minutes=config.PENDING_REQUEST_TTL_MINUTES)
-            ).isoformat()
+            expires_at = (datetime.utcnow() + timedelta(minutes=config.PENDING_REQUEST_TTL_MINUTES)).isoformat()
             database.update_pending_token(req["id"], token, expires_at)
-
             verify_url = f"{config.WEB_BASE_URL}/verify?token={token}"
             markup = InlineKeyboardMarkup()
             markup.add(
                 InlineKeyboardButton(
-                    text="\U0001f513 Verify to Get Full Access",
+                    text="\U0001f513 Verify to Access Chat",
                     web_app=WebAppInfo(url=verify_url),
                 )
             )
             bot.send_message(
                 user_id,
-                f"Hi {first_name}! You joined a group but haven't verified yet. "
-                "Complete verification to get full access (send messages, media, etc.).",
+                f"Hi {first_name}! You joined Crocodile Games group but haven't verified yet. "
+                "Complete verification to get access (send messages, stickers, etc.) to the group.",
                 reply_markup=markup,
             )
         return
+    bot.send_message(user_id, f"Hi {first_name}!\nI'm a verification bot built by Crocodile Games.")
 
-    bot.send_message(
-        user_id,
-        f"Hi {first_name}! I'm the group verification bot.\n\n"
-        "When you request to join a group I protect, I'll send you a "
-        "quick verification link here.",
-    )
+
+@bot.message_handler(commands=["multis"])
+def handle_multis(message):
+    """Show how many users have multiple accounts."""
+    if not message.from_user.id in SUPERUSERS:
+        return
+    clusters = database.get_all_multi_account_clusters()
+    if not clusters:
+        bot.reply_to(message, "No multi-account users detected yet.")
+        return
+    total_accounts = sum(len(c) for c in clusters)
+    lines = [
+        f"Multi-account clusters: {len(clusters)}",
+        f"Total accounts involved: {total_accounts}",
+        "",
+    ]
+    for i, cluster in enumerate(sorted(clusters, key=len, reverse=True), 1):
+        user_labels = []
+        for uid in sorted(cluster):
+            name = database.get_user_name(uid)
+            user_labels.append(f"{name} ({uid})" if name else str(uid))
+        lines.append(f"{i}. [{len(cluster)} accounts] {', '.join(user_labels)}")
+    bot.reply_to(message, "\n".join(lines))
+
+
+@bot.message_handler(commands=["connections"])
+def handle_connections(message):
+    """Show all connections for a specific user: /connections <user_id>"""
+    if not message.from_user.id in SUPERUSERS:
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        bot.reply_to(message, "Usage: /connections <user_id>")
+        return
+    try:
+        target_uid = int(parts[1])
+    except ValueError:
+        bot.reply_to(message, "Invalid user ID. Must be a number.")
+        return
+    connected = database.get_all_connected_users(target_uid)
+    if len(connected) <= 1:
+        bot.reply_to(message, f"User {target_uid} has no linked accounts.")
+        return
+    details = database.get_connection_details(target_uid)
+    connected_labels = []
+    for uid in sorted(connected):
+        name = database.get_user_name(uid)
+        connected_labels.append(f"{name} ({uid})" if name else str(uid))
+    target_name = database.get_user_name(target_uid)
+    target_label = f"{target_name} ({target_uid})" if target_name else str(target_uid)
+    lines = [
+        f"Connections for {target_label}",
+        f"Linked accounts ({len(connected)}): {', '.join(connected_labels)}",
+        "",
+        "Detection history:",
+    ]
+    for flag in details:
+        status = flag["action_taken"]
+        score = flag["similarity_score"]
+        components = flag["matching_components"]
+        ts = flag["created_at"]
+        new_name = flag.get("new_user_name") or database.get_user_name(flag["new_user_id"]) or ""
+        matched_name = flag.get("matched_user_name") or database.get_user_name(flag["matched_user_id"]) or ""
+        new_lbl = f"{new_name} ({flag['new_user_id']})" if new_name else str(flag["new_user_id"])
+        matched_lbl = f"{matched_name} ({flag['matched_user_id']})" if matched_name else str(flag["matched_user_id"])
+        lines.append(
+            f"  {new_lbl} <-> {matched_lbl} "
+            f"| {score:.0%} | {components} | {status} | {ts}"
+        )
+    bot.reply_to(message, "\n".join(lines))
 
 
 @bot.chat_join_request_handler()
-def handle_join_request(join_request):
+def handle_join_request(jr):
     """
     Triggered when a user requests to join a group where the bot is admin
     with 'Approve new members' permission.
     """
-    chat_id = join_request.chat.id
-    user_id = join_request.from_user.id
-    first_name = join_request.from_user.first_name or "there"
-
+    chat_id = jr.chat.id
+    user_id = jr.from_user.id
+    full_name = jr.from_user.first_name + (" " + jr.from_user.last_name if jr.from_user.last_name else "")
+    if config.ALLOWED_GROUPS and chat_id not in config.ALLOWED_GROUPS:
+        logger.debug("Ignoring join request from non-allowed group %s", chat_id)
+        return
+    if user_id in SUPERUSERS:
+        # Auto-approve superusers without DM
+        try:
+            bot.approve_chat_join_request(chat_id, user_id)
+            logger.info("Auto-approved superuser %s for chat %s", user_id, chat_id)
+        except Exception:
+            logger.exception("Failed to approve superuser %s", user_id)
+        return
     token = uuid.uuid4().hex
     expires_at = (
         datetime.utcnow()
         + timedelta(minutes=config.PENDING_REQUEST_TTL_MINUTES)
     ).isoformat()
-
     try:
         # Try to DM the user with a verification link
         verify_url = f"{config.WEB_BASE_URL}/verify?token={token}"
@@ -103,17 +179,16 @@ def handle_join_request(join_request):
                 web_app=WebAppInfo(url=verify_url),
             )
         )
-
         bot.send_message(
             user_id,
-            f"Hi {first_name}! To join the group, please complete a quick verification.",
+            f"Hi {full_name}! To join the group, please complete a captcha verification.",
             reply_markup=markup,
         )
-
         # DM succeeded — store as normal pending request
         database.create_pending_request(
             chat_id=chat_id,
             user_id=user_id,
+            user_name=full_name,
             token=token,
             expires_at=expires_at,
             status="pending",
@@ -121,7 +196,6 @@ def handle_join_request(join_request):
         logger.info(
             "Sent verification DM to user %s for chat %s", user_id, chat_id
         )
-
     except telebot.apihelper.ApiTelegramException as e:
         err_msg = str(e).lower()
         if "bot can't initiate conversation" in err_msg or "chat not found" in err_msg or "forbidden" in err_msg:
@@ -145,10 +219,18 @@ def handle_join_request(join_request):
                 database.create_pending_request(
                     chat_id=chat_id,
                     user_id=user_id,
+                    user_name=full_name,
                     token=None,
                     expires_at=None,
                     status="restricted",
                 )
+                sleep(1)
+                # Send message in the group with mention to user prompting to complete verification
+                markup = InlineKeyboardMarkup(InlineKeyboardButton(
+                        text="\U0001f513 Verify",
+                        web_app=WebAppInfo(url=verify_url),
+                ))
+                bot.send_message(chat_id, f'Hi {full_name}! To access this chat, press the button below to complete verification.', reply_markup=markup)
             except Exception:
                 logger.exception(
                     "Failed to approve/restrict user %s in chat %s",
@@ -158,7 +240,6 @@ def handle_join_request(join_request):
             logger.exception(
                 "Telegram API error for join request user %s", user_id
             )
-
     except Exception:
         logger.exception(
             "Unexpected error handling join request for user %s", user_id
@@ -169,11 +250,13 @@ def handle_join_request(join_request):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ban:"))
 def handle_ban(call):
+    if not call.from_user.id in SUPERUSERS:
+        bot.answer_callback_query(call.id, "Unauthorized.")
+        return
     parts = call.data.split(":")
     chat_id, user_id = int(parts[1]), int(parts[2])
     try:
         bot.ban_chat_member(chat_id, user_id)
-        bot.answer_callback_query(call.id, f"User {user_id} banned.")
         bot.edit_message_text(
             call.message.text + f"\n\n--- User {user_id} BANNED by admin ---",
             call.message.chat.id,
@@ -185,6 +268,9 @@ def handle_ban(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("banboth:"))
 def handle_ban_both(call):
+    if not call.from_user.id in SUPERUSERS:
+        bot.answer_callback_query(call.id, "Unauthorized.")
+        return
     parts = call.data.split(":")
     chat_id, user1, user2 = int(parts[1]), int(parts[2]), int(parts[3])
     errors = []
@@ -195,8 +281,6 @@ def handle_ban_both(call):
             errors.append(f"User {uid}: {e}")
     if errors:
         bot.answer_callback_query(call.id, f"Partial: {'; '.join(errors)}")
-    else:
-        bot.answer_callback_query(call.id, "Both users banned.")
     bot.edit_message_text(
         call.message.text + f"\n\n--- Users {user1} & {user2} BANNED by admin ---",
         call.message.chat.id,
@@ -206,9 +290,30 @@ def handle_ban_both(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("dismiss:"))
 def handle_dismiss(call):
-    bot.answer_callback_query(call.id, "Dismissed.")
+    if not call.from_user.id in SUPERUSERS:
+        bot.answer_callback_query(call.id, "Unauthorized.")
+        return
+    parts = call.data.split(":")
+    new_uid, matched_uid = parts[1], parts[2]
     bot.edit_message_text(
         call.message.text + "\n\n--- DISMISSED by admin ---",
+        call.message.chat.id,
+        call.message.message_id,
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("fp:"))
+def handle_false_positive(call):
+    """Mark as false positive — updates flag in DB but deletes nothing."""
+    if not call.from_user.id in SUPERUSERS:
+        bot.answer_callback_query(call.id, "Unauthorized.")
+        return
+    parts = call.data.split(":")
+    new_uid, matched_uid = int(parts[1]), int(parts[2])
+    database.mark_false_positive(new_uid, matched_uid)
+    bot.answer_callback_query(call.id, "Marked as false positive.")
+    bot.edit_message_text(
+        call.message.text + "\n\n--- FALSE POSITIVE marked by admin ---",
         call.message.chat.id,
         call.message.message_id,
     )
@@ -270,12 +375,23 @@ def receive_fingerprint():
     chat_id = pending["chat_id"]
     user_id = pending["user_id"]
 
-    # 5. Build fingerprint record with server-side IP
+    # 5. Extract user's full name from initData
+    user_full_name = ""
+    try:
+        user_info = json.loads(validated.get("user", "{}"))
+        first = user_info.get("first_name", "")
+        last = user_info.get("last_name", "")
+        user_full_name = f"{first} {last}".strip() if last else first
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # 6. Build fingerprint record with server-side IP
     client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
     if client_ip and "," in client_ip:
         client_ip = client_ip.split(",")[0].strip()
 
     fp_record = {
+        "full_name": user_full_name,
         "device_id": fingerprint_data.get("deviceId", ""),
         "canvas_hash": fingerprint_data.get("canvasHash", ""),
         "webgl_hash": fingerprint_data.get("webglHash", ""),
@@ -294,45 +410,91 @@ def receive_fingerprint():
         "raw_data": json.dumps(fingerprint_data),
     }
 
-    # 6. Fast-path: check device_id
+    # ── STEP 0: Check if user is already linked (permanent link) ──
+    # Once flagged, always flagged — regardless of current fingerprint.
+    existing_link = database.find_existing_link(user_id)
+    if existing_link:
+        # Determine the other user in this link
+        matched_user_id = (
+            existing_link["matched_user_id"]
+            if existing_link["new_user_id"] == user_id
+            else existing_link["new_user_id"]
+        )
+        database.upsert_fingerprint(user_id, fp_record)
+        database.mark_pending_completed(token)
+        # Silently approve — no alert for known linked accounts re-joining
+        try:
+            bot.approve_chat_join_request(chat_id, user_id)
+        except Exception:
+            pass
+        logger.info(
+            "User %s re-joined (permanently linked to %s), auto-approved silently",
+            user_id, matched_user_id,
+        )
+        return jsonify({"ok": True, "status": "approved"})
+
+    # ── STEP 1: Fast-path #1 — device_id (same Telegram app) ─────
     device_id_match = fp_module.check_device_id_match(
         fp_record["device_id"], user_id, database
     )
 
     if device_id_match:
         matched_user_id = device_id_match["user_id"]
+        matched_name = database.get_user_name(matched_user_id) or ""
         database.upsert_fingerprint(user_id, fp_record)
         database.record_flag(
-            user_id, matched_user_id, 1.0, ["device_id"], "flagged", chat_id
+            user_id, matched_user_id, 1.0, ["device_id"], "flagged", chat_id,
+            new_user_name=user_full_name, matched_user_name=matched_name,
         )
         database.mark_pending_completed(token)
-        _handle_flag_result(chat_id, user_id, matched_user_id, 1.0, ["device_id"])
+        _handle_flag_result(chat_id, user_id, matched_user_id, 1.0, ["device_id"],
+                            new_user_name=user_full_name, matched_user_name=matched_name)
         return jsonify({"ok": True, "status": "flagged"})
 
-    # 7. Full comparison
+    # ── STEP 2: Fast-path #2 — ip_address (same network) ─────────
+    ip_match = fp_module.check_ip_match(
+        fp_record["ip_address"], user_id, database
+    )
+
+    if ip_match:
+        matched_user_id = ip_match["user_id"]
+        matched_name = database.get_user_name(matched_user_id) or ""
+        database.upsert_fingerprint(user_id, fp_record)
+        database.record_flag(
+            user_id, matched_user_id, 1.0, ["ip_address"], "flagged", chat_id,
+            new_user_name=user_full_name, matched_user_name=matched_name,
+        )
+        database.mark_pending_completed(token)
+        _handle_flag_result(chat_id, user_id, matched_user_id, 1.0, ["ip_address"],
+                            new_user_name=user_full_name, matched_user_name=matched_name)
+        return jsonify({"ok": True, "status": "flagged"})
+
+    # ── STEP 3: Full weighted comparison ──────────────────────────
     all_existing = database.get_all_fingerprints_except(user_id)
     match_result = fp_module.find_matching_user(fp_record, all_existing)
 
-    # 8. Store fingerprint
+    # Store fingerprint regardless
     database.upsert_fingerprint(user_id, fp_record)
     database.mark_pending_completed(token)
 
     if match_result:
         matched_fp, score, components = match_result
         matched_user_id = matched_fp["user_id"]
+        matched_name = database.get_user_name(matched_user_id) or ""
         action = "declined" if config.AUTO_DECLINE_ON_MATCH else "flagged"
         database.record_flag(
-            user_id, matched_user_id, score, components, action, chat_id
+            user_id, matched_user_id, score, components, action, chat_id,
+            new_user_name=user_full_name, matched_user_name=matched_name,
         )
-        _handle_flag_result(chat_id, user_id, matched_user_id, score, components)
+        _handle_flag_result(chat_id, user_id, matched_user_id, score, components,
+                            new_user_name=user_full_name, matched_user_name=matched_name)
         return jsonify({"ok": True, "status": "flagged"})
     else:
         # No match — approve and unrestrict if needed
         try:
             bot.approve_chat_join_request(chat_id, user_id)
         except Exception:
-            # May already be approved (restricted flow)
-            pass
+            pass  # May already be approved (restricted flow)
         _unrestrict_user(chat_id, user_id)
         logger.info("Approved user %s for chat %s", user_id, chat_id)
         return jsonify({"ok": True, "status": "approved"})
@@ -372,6 +534,8 @@ def _handle_flag_result(
     matched_user_id: int,
     score: float,
     components: list,
+    new_user_name: str = "",
+    matched_user_name: str = "",
 ):
     """Handle a multi-account match: decide action + notify admin."""
     if config.AUTO_DECLINE_ON_MATCH:
@@ -390,7 +554,8 @@ def _handle_flag_result(
         except Exception:
             pass  # May already be approved
 
-    _notify_admin(chat_id, new_user_id, matched_user_id, score, components)
+    _notify_admin(chat_id, new_user_id, matched_user_id, score, components,
+                  new_user_name=new_user_name, matched_user_name=matched_user_name)
 
 
 def _notify_admin(
@@ -399,9 +564,11 @@ def _notify_admin(
     matched_user_id: int,
     score: float,
     components: list,
+    new_user_name: str = "",
+    matched_user_name: str = "",
 ):
-    """Send alert to admin with inline action buttons."""
-    if not config.ADMIN_CHAT_ID:
+    """Send alert to log chat with inline action buttons."""
+    if not config.LOG_CHAT_ID:
         return
 
     action_word = (
@@ -410,16 +577,32 @@ def _notify_admin(
     )
     components_str = ", ".join(components)
 
+    new_label = f"{new_user_name} ({new_user_id})" if new_user_name else str(new_user_id)
+    matched_label = f"{matched_user_name} ({matched_user_id})" if matched_user_name else str(matched_user_id)
+
+    # Show total linked accounts if this is part of a larger cluster
+    connected = database.get_all_connected_users(new_user_id)
+    cluster_info = ""
+    if len(connected) > 2:
+        cluster_labels = []
+        for uid in sorted(connected):
+            name = database.get_user_name(uid)
+            cluster_labels.append(f"{name} ({uid})" if name else str(uid))
+        cluster_info = (
+            f"\nCluster: {len(connected)} linked accounts total"
+            f"\nAll: {', '.join(cluster_labels)}"
+        )
+
     alert_text = (
         "\U000026a0\U0000fe0f MULTI-ACCOUNT DETECTED\n"
         f"{'=' * 32}\n"
         f"Status: {action_word}\n\n"
-        f"New user: {new_user_id}\n"
-        f"Matches: {matched_user_id}\n"
+        f"New user: {new_label}\n"
+        f"Matches: {matched_label}\n"
         f"Similarity: {score:.0%}\n"
         f"Signals: {components_str}\n"
         f"Group: {chat_id}\n"
-        f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        f"{cluster_info}"
     )
 
     markup = InlineKeyboardMarkup()
@@ -437,11 +620,15 @@ def _notify_admin(
         InlineKeyboardButton(
             "Dismiss",
             callback_data=f"dismiss:{new_user_id}:{matched_user_id}",
-        )
+        ),
+        InlineKeyboardButton(
+            "False Positive",
+            callback_data=f"fp:{new_user_id}:{matched_user_id}",
+        ),
     )
 
     try:
-        bot.send_message(config.ADMIN_CHAT_ID, alert_text, reply_markup=markup)
+        bot.send_message(config.LOG_CHAT_ID, alert_text, reply_markup=markup)
     except Exception:
         logger.exception("Failed to notify admin about flag")
 
