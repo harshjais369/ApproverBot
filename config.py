@@ -6,6 +6,7 @@ load_dotenv()
 # Telegram
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 LOG_CHAT_ID = int(os.getenv("LOG_CHAT_ID", "0"))  # Chat where alerts are sent
+LOG_THREAD_ID = int(os.getenv("LOG_THREAD_ID", "0"))  # Thread in log chat for alerts (0 = no thread)
 SUPERUSERS = [
     int(uid.strip())
     for uid in os.getenv("SUPERUSERS", "").split(",")

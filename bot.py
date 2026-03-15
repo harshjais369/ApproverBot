@@ -14,8 +14,7 @@ from telebot.types import (
 )
 from flask import Flask, request, render_template, jsonify
 
-import config
-from config import SUPERUSERS
+from config import *
 import database
 import fingerprint as fp_module
 import validation
@@ -31,7 +30,7 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("TeleBot").setLevel(logging.WARNING)
 
-bot = telebot.TeleBot(config.BOT_TOKEN, allow_sending_without_reply=True)
+bot = telebot.TeleBot(BOT_TOKEN, allow_sending_without_reply=True)
 app = Flask(__name__)
 
 
@@ -55,9 +54,9 @@ def handle_start(message):
     if restricted:
         for req in restricted:
             token = uuid.uuid4().hex
-            expires_at = (datetime.utcnow() + timedelta(minutes=config.PENDING_REQUEST_TTL_MINUTES)).isoformat()
+            expires_at = (datetime.utcnow() + timedelta(minutes=PENDING_REQUEST_TTL_MINUTES)).isoformat()
             database.update_pending_token(req["id"], token, expires_at)
-            verify_url = f"{config.WEB_BASE_URL}/verify?token={token}"
+            verify_url = f"{WEB_BASE_URL}/verify?token={token}"
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton(
                 text="\U0001f513 Verify to Access Chat",
@@ -157,7 +156,7 @@ def handle_join_request(jr):
     chat_id = jr.chat.id
     user_id = jr.from_user.id
     full_name = jr.from_user.first_name + (" " + jr.from_user.last_name if jr.from_user.last_name else "")
-    if config.ALLOWED_GROUPS and chat_id not in config.ALLOWED_GROUPS:
+    if ALLOWED_GROUPS and chat_id not in ALLOWED_GROUPS:
         logger.debug("Ignoring join request from non-allowed group %s", chat_id)
         return
     if user_id in SUPERUSERS:
@@ -171,11 +170,11 @@ def handle_join_request(jr):
     token = uuid.uuid4().hex
     expires_at = (
         datetime.utcnow()
-        + timedelta(minutes=config.PENDING_REQUEST_TTL_MINUTES)
+        + timedelta(minutes=PENDING_REQUEST_TTL_MINUTES)
     ).isoformat()
     try:
         # Try to DM the user with a verification link
-        verify_url = f"{config.WEB_BASE_URL}/verify?token={token}"
+        verify_url = f"{WEB_BASE_URL}/verify?token={token}"
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(
             text="\U0001f513 I'm not a robot",
@@ -307,7 +306,6 @@ def handle_false_positive(call):
     parts = call.data.split(":")
     new_uid, matched_uid = int(parts[1]), int(parts[2])
     database.mark_false_positive(new_uid, matched_uid)
-    bot.answer_callback_query(call.id, "Marked as false positive.")
     bot.edit_message_text(
         call.message.text + "\n\n--- FALSE POSITIVE marked by admin ---",
         call.message.chat.id,
@@ -330,7 +328,7 @@ def serve_verify_page():
     if not pending:
         return "This verification link has expired or is invalid.", 404
 
-    return render_template("verify.html", token=token, api_url=config.WEB_BASE_URL)
+    return render_template("verify.html", token=token, api_url=WEB_BASE_URL)
 
 
 @app.route("/api/verify", methods=["POST"])
@@ -478,7 +476,7 @@ def receive_fingerprint():
         matched_fp, score, components = match_result
         matched_user_id = matched_fp["user_id"]
         matched_name = database.get_user_name(matched_user_id) or ""
-        action = "declined" if config.AUTO_DECLINE_ON_MATCH else "flagged"
+        action = "declined" if AUTO_DECLINE_ON_MATCH else "flagged"
         database.record_flag(
             user_id, matched_user_id, score, components, action, chat_id,
             new_user_name=user_full_name, matched_user_name=matched_name,
@@ -535,7 +533,7 @@ def _handle_flag_result(
     matched_user_name: str = "",
 ):
     """Handle a multi-account match: decide action + notify admin."""
-    if config.AUTO_DECLINE_ON_MATCH:
+    if AUTO_DECLINE_ON_MATCH:
         try:
             bot.decline_chat_join_request(chat_id, new_user_id)
             logger.info(
@@ -566,18 +564,15 @@ def _notify_admin(
     matched_user_name: str = "",
 ):
     """Send alert to log chat with inline action buttons."""
-    if not config.LOG_CHAT_ID:
+    if not LOG_CHAT_ID:
         return
-
     action_word = (
-        "DECLINED" if config.AUTO_DECLINE_ON_MATCH
-        else "FLAGGED (approved, pending review)"
+        "DECLINED" if AUTO_DECLINE_ON_MATCH
+        else "Approved (pending review)"
     )
     components_str = ", ".join(components)
-
     new_label = f"{new_user_name} ({new_user_id})" if new_user_name else str(new_user_id)
     matched_label = f"{matched_user_name} ({matched_user_id})" if matched_user_name else str(matched_user_id)
-
     # Show total linked accounts if this is part of a larger cluster
     connected = database.get_all_connected_users(new_user_id)
     cluster_info = ""
@@ -590,7 +585,6 @@ def _notify_admin(
             f"\nCluster: {len(connected)} linked accounts total"
             f"\nAll: {', '.join(cluster_labels)}"
         )
-
     alert_text = (
         "\U000026a0\U0000fe0f MULTI-ACCOUNT DETECTED\n"
         f"{'=' * 32}\n"
@@ -602,7 +596,6 @@ def _notify_admin(
         f"Group: {chat_id}\n"
         f"{cluster_info}"
     )
-
     markup = InlineKeyboardMarkup()
     markup.row(
         InlineKeyboardButton(
@@ -624,9 +617,8 @@ def _notify_admin(
             callback_data=f"fp:{new_user_id}:{matched_user_id}",
         ),
     )
-
     try:
-        bot.send_message(config.LOG_CHAT_ID, alert_text, reply_markup=markup)
+        bot.send_message(LOG_CHAT_ID, alert_text, reply_markup=markup, message_thread_id=(LOG_THREAD_ID if LOG_THREAD_ID != 0 else None))
     except Exception:
         logger.exception("Failed to notify admin about flag")
 
@@ -636,7 +628,7 @@ def _notify_admin(
 # ═══════════════════════════════════════════════════════════════════
 
 def run_flask():
-    app.run(host=config.WEB_HOST, port=config.WEB_PORT, debug=False)
+    app.run(host=WEB_HOST, port=WEB_PORT, debug=False)
 
 
 if __name__ == "__main__":
@@ -651,7 +643,7 @@ if __name__ == "__main__":
     # Start Flask in background thread
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    logger.info("Flask server started on %s:%s", config.WEB_HOST, config.WEB_PORT)
+    logger.info("Flask server started on %s:%s", WEB_HOST, WEB_PORT)
 
     # Start bot polling on main thread
     BOT_USERNAME = bot.get_me().username.removeprefix("@")
