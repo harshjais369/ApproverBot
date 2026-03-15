@@ -1,0 +1,16 @@
+.venv/
+.git/
+.env
+.env.example
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+*.pyo
+.gitignore
+nginx/
+docker-compose.yml
+deploy.sh
+experiments/
+*.log
