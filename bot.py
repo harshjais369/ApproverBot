@@ -31,7 +31,7 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("TeleBot").setLevel(logging.WARNING)
 
-bot = telebot.TeleBot(config.BOT_TOKEN)
+bot = telebot.TeleBot(config.BOT_TOKEN, allow_sending_without_reply=True)
 app = Flask(__name__)
 
 
@@ -46,6 +46,8 @@ def handle_start(message):
     entries (they joined group but couldn't be DM'd), and sends them
     a verification link now.
     """
+    if message.chat.type != "private":
+        return
     user_id = message.from_user.id
     first_name = message.from_user.first_name or "there"
     # Check for any restricted (un-verified) pending requests
@@ -57,20 +59,22 @@ def handle_start(message):
             database.update_pending_token(req["id"], token, expires_at)
             verify_url = f"{config.WEB_BASE_URL}/verify?token={token}"
             markup = InlineKeyboardMarkup()
-            markup.add(
-                InlineKeyboardButton(
-                    text="\U0001f513 Verify to Access Chat",
-                    web_app=WebAppInfo(url=verify_url),
-                )
-            )
+            markup.add(InlineKeyboardButton(
+                text="\U0001f513 Verify to Access Chat",
+                web_app=WebAppInfo(url=verify_url),
+            ))
+            markup.add(InlineKeyboardButton(
+                text="🔙 Return to Group",
+                url=f"https://t.me/CrocodileGamesGroup",
+            ))
             bot.send_message(
                 user_id,
-                f"Hi {first_name}! You joined Crocodile Games group but haven't verified yet. "
+                f"Hi {first_name}!\nYou joined Crocodile Games group but haven't verified yet. "
                 "Complete verification to get access (send messages, stickers, etc.) to the group.",
                 reply_markup=markup,
             )
         return
-    bot.send_message(user_id, f"Hi {first_name}!\nI'm a verification bot built by Crocodile Games.")
+    bot.send_message(user_id, f"Hi {first_name}!\nI'm a verification bot built by Crocodile Games (@CrocodileGames).")
 
 
 @bot.message_handler(commands=["multis"])
@@ -173,17 +177,16 @@ def handle_join_request(jr):
         # Try to DM the user with a verification link
         verify_url = f"{config.WEB_BASE_URL}/verify?token={token}"
         markup = InlineKeyboardMarkup()
-        markup.add(
-            InlineKeyboardButton(
-                text="\U0001f513 Verify to Join",
-                web_app=WebAppInfo(url=verify_url),
-            )
-        )
-        bot.send_message(
-            user_id,
-            f"Hi {full_name}! To join the group, please complete a captcha verification.",
-            reply_markup=markup,
-        )
+        markup.add(InlineKeyboardButton(
+            text="\U0001f513 I'm not a robot",
+            web_app=WebAppInfo(url=verify_url),
+        ))
+        markup.add(InlineKeyboardButton(
+            text="🔙 Return to Group",
+            url=f"https://t.me/CrocodileGamesGroup",
+        ))
+        bot.send_message(user_id, f"Hi {full_name}! To join the group (@CrocodileGamesGroup), please verify you are not a robot by accepting the terms (rules).",
+                        reply_markup=markup)
         # DM succeeded — store as normal pending request
         database.create_pending_request(
             chat_id=chat_id,
@@ -193,9 +196,7 @@ def handle_join_request(jr):
             expires_at=expires_at,
             status="pending",
         )
-        logger.info(
-            "Sent verification DM to user %s for chat %s", user_id, chat_id
-        )
+        logger.info("Sent verification DM to user %s for chat %s", user_id, chat_id)
     except telebot.apihelper.ApiTelegramException as e:
         err_msg = str(e).lower()
         if "bot can't initiate conversation" in err_msg or "chat not found" in err_msg or "forbidden" in err_msg:
@@ -226,24 +227,19 @@ def handle_join_request(jr):
                 )
                 sleep(1)
                 # Send message in the group with mention to user prompting to complete verification
-                markup = InlineKeyboardMarkup(InlineKeyboardButton(
+                markup = InlineKeyboardMarkup([[InlineKeyboardButton(
                         text="\U0001f513 Verify",
-                        web_app=WebAppInfo(url=verify_url),
-                ))
-                bot.send_message(chat_id, f'Hi {full_name}! To access this chat, press the button below to complete verification.', reply_markup=markup)
+                        url=f"https://t.me/{BOT_USERNAME}?start=verifyInChat{chat_id}_{user_id}",
+                )]])
+                full_name = full_name if len(full_name) <= 25 else full_name[:22] + "..."
+                bot.send_message(chat_id, f'Hi {full_name}!\nTo access this chat, please DM me to verify you are not a robot by accepting the terms (rules).',
+                                 reply_markup=markup)
             except Exception:
-                logger.exception(
-                    "Failed to approve/restrict user %s in chat %s",
-                    user_id, chat_id,
-                )
+                logger.exception("Failed to approve/restrict user %s in chat %s", user_id, chat_id)
         else:
-            logger.exception(
-                "Telegram API error for join request user %s", user_id
-            )
+            logger.exception("Telegram API error for join request user %s", user_id)
     except Exception:
-        logger.exception(
-            "Unexpected error handling join request for user %s", user_id
-        )
+        logger.exception("Unexpected error handling join request for user %s", user_id)
 
 
 # ── Admin callback handlers ───────────────────────────────────────
@@ -427,6 +423,7 @@ def receive_fingerprint():
             bot.approve_chat_join_request(chat_id, user_id)
         except Exception:
             pass
+        _unrestrict_user(chat_id, user_id)
         logger.info(
             "User %s re-joined (permanently linked to %s), auto-approved silently",
             user_id, matched_user_id,
@@ -522,8 +519,8 @@ def _unrestrict_user(chat_id: int, user_id: int):
             ),
         )
     except Exception:
-        logger.debug(
-            "Could not unrestrict user %s in chat %s (may not be restricted)",
+        logger.warning(
+            "Could not unrestrict user %s in chat %s",
             user_id, chat_id,
         )
 
@@ -553,6 +550,7 @@ def _handle_flag_result(
             bot.approve_chat_join_request(chat_id, new_user_id)
         except Exception:
             pass  # May already be approved
+        _unrestrict_user(chat_id, new_user_id)
 
     _notify_admin(chat_id, new_user_id, matched_user_id, score, components,
                   new_user_name=new_user_name, matched_user_name=matched_user_name)
@@ -656,7 +654,8 @@ if __name__ == "__main__":
     logger.info("Flask server started on %s:%s", config.WEB_HOST, config.WEB_PORT)
 
     # Start bot polling on main thread
-    logger.info("Starting bot polling...")
+    BOT_USERNAME = bot.get_me().username.removeprefix("@")
+    logger.info("Started bot as @%s", BOT_USERNAME)
     bot.infinity_polling(
         timeout=60,
         long_polling_timeout=60,

@@ -3,80 +3,256 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Group Verification</title>
+    <title>Terms &amp; Conditions — Crocodile Games</title>
     <script src="https://telegram.org/js/telegram-web-app.js?61"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--tg-theme-bg-color, #ffffff);
             color: var(--tg-theme-text-color, #000000);
+        }
+
+        /* ── Loading state ─────────────────────────────── */
+        #loading {
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
+            min-height: var(--tg-viewport-stable-height, 100vh);
             padding: 24px;
         }
-        .container {
-            text-align: center;
-            max-width: 360px;
-            width: 100%;
-        }
-        .icon {
-            font-size: 48px;
-            margin-bottom: 16px;
-        }
-        .title {
-            font-size: 20px;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-        .subtitle {
-            font-size: 14px;
-            color: var(--tg-theme-hint-color, #999999);
-            line-height: 1.5;
-            margin-bottom: 24px;
-        }
         .spinner {
-            width: 40px;
-            height: 40px;
+            width: 36px;
+            height: 36px;
             border: 3px solid var(--tg-theme-hint-color, #cccccc);
             border-top-color: var(--tg-theme-button-color, #3390ec);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
-            margin: 0 auto 16px;
+            margin-bottom: 14px;
         }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        .status {
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text {
             font-size: 14px;
             color: var(--tg-theme-hint-color, #999999);
         }
-        .hidden { display: none; }
+
+        /* ── Terms page ────────────────────────────────── */
+        #ready {
+            display: flex;
+            flex-direction: column;
+            height: var(--tg-viewport-stable-height, 100vh);
+            overflow: hidden;
+            padding: 20px 18px 0;
+        }
+        .page-header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--tg-theme-hint-color, #e0e0e0);
+            flex-shrink: 0;
+        }
+        .page-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .page-subtitle {
+            font-size: 13px;
+            color: var(--tg-theme-hint-color, #999999);
+            line-height: 1.4;
+        }
+
+        .terms-intro {
+            font-size: 13.5px;
+            line-height: 1.55;
+            color: var(--tg-theme-text-color, #000000);
+            margin-bottom: 16px;
+            flex-shrink: 0;
+        }
+
+        .terms-list {
+            list-style: none;
+            counter-reset: term;
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        .terms-list > li {
+            counter-increment: term;
+            position: relative;
+            padding: 10px 0 10px 32px;
+            font-size: 13.5px;
+            line-height: 1.55;
+            border-bottom: 1px solid color-mix(in srgb, var(--tg-theme-hint-color, #e0e0e0) 35%, transparent);
+        }
+        .terms-list > li:last-child {
+            border-bottom: none;
+        }
+        .terms-list > li::before {
+            content: counter(term) ".";
+            position: absolute;
+            left: 0;
+            font-weight: 600;
+            color: var(--tg-theme-link-color, #3390ec);
+            font-size: 13px;
+            top: 10px;
+        }
+
+        .sub-clauses {
+            list-style: none;
+            counter-reset: sub;
+            margin-top: 6px;
+            padding-left: 4px;
+        }
+        .sub-clauses li {
+            counter-increment: sub;
+            position: relative;
+            padding: 3px 0 3px 28px;
+            font-size: 12.5px;
+            color: var(--tg-theme-hint-color, #999999);
+            line-height: 1.5;
+        }
+        .sub-clauses li::before {
+            content: "(" counter(sub, lower-roman) ")";
+            position: absolute;
+            left: 0;
+            font-size: 12px;
+            color: var(--tg-theme-hint-color, #999999);
+        }
+
+        .terms-footer {
+            padding: 14px 0 10px;
+            border-top: 1px solid var(--tg-theme-hint-color, #e0e0e0);
+            font-size: 12.5px;
+            color: var(--tg-theme-hint-color, #999999);
+            line-height: 1.5;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        /* ── Result state ──────────────────────────────── */
+        #result {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: var(--tg-viewport-stable-height, 100vh);
+            padding: 24px;
+            text-align: center;
+        }
+        .result-icon {
+            font-size: 48px;
+            margin-bottom: 14px;
+        }
+        .result-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .result-text {
+            font-size: 14px;
+            color: var(--tg-theme-hint-color, #999999);
+            line-height: 1.5;
+            max-width: 300px;
+        }
+
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Loading state -->
-        <div id="loading">
-            <div class="spinner"></div>
-            <p class="status">Preparing verification...</p>
+    <!-- Loading state -->
+    <div id="loading">
+        <div class="spinner"></div>
+        <p class="loading-text">Loading terms…</p>
+    </div>
+
+    <!-- Terms & Conditions -->
+    <div id="ready" class="hidden">
+        <div class="page-header">
+            <div class="page-title">Terms &amp; Conditions</div>
+            <div class="page-subtitle">Crocodile Games 🐊🇮🇳 — Support Group</div>
         </div>
 
-        <!-- Ready state -->
-        <div id="ready" class="hidden">
-            <div class="icon">&#128274;</div>
-            <div class="title">Verify Your Identity</div>
-            <p class="subtitle">Tap the button below to complete verification and join the group.</p>
-        </div>
+        <p class="terms-intro">
+            By joining <b>@CrocodileGamesGroup</b>, you agree to the following terms:
+        </p>
 
-        <!-- Result state -->
-        <div id="result" class="hidden">
-            <div class="icon" id="result-icon"></div>
-            <div class="title" id="result-title"></div>
-            <p class="subtitle" id="result-text"></p>
+        <ol class="terms-list">
+            <li>
+                Do not DM any member/admin without their prior and explicit consent.
+                <ol class="sub-clauses">
+                    <li>If you receive unsolicited DMs from someone in this group, report it to an admin immediately.</li>
+                </ol>
+            </li>
+            <li>
+                Disturbing, harassing, or provoking any member, whether in the group or in private DMs, is strictly prohibited.
+            </li>
+            <li>
+                Unsolicited or repeated mentions/tags to admins or unknown random members in the group are not allowed.
+                <ol class="sub-clauses">
+                    <li>Only tag members when necessary and relevant to the discussion.</li>
+                    <li>Do not tag admins for non-urgent/irrelevant matters or to seek attention.</li>
+                </ol>
+            </li>
+            <li>
+                All promotions or advertisements, whether in the group or via DMs to its members, require prior admin approval.
+                <ol class="sub-clauses">
+                    <li>Links or ads in your profile are allowed, as long as they don't contain NSFW, harmful, or objectionable content.</li>
+                    <li>Suspicious accounts or bots with ads/links in their profile, or those sending unsolicited greetings, will be banned.</li>
+                </ol>
+            </li>
+            <li>
+                Using or testing bots, automated scripts, or userbots of any kind is prohibited.
+            </li>
+            <li>
+                Using multiple accounts to bypass restrictions/bans, harass members, or for any malicious purpose will result in a permanent ban of all associated accounts.
+            </li>
+            <li>
+                Do not mass-delete your own messages from the group chat.
+            </li>
+            <li>
+                Sending any inappropriate, disturbing, hateful, provoking, sexual, or otherwise objectionable texts or contents is prohibited.
+                <ol class="sub-clauses">
+                    <li>This includes indirect use of words, emojis, or context in an inappropriate manner.</li>
+                    <li>Anything that may be considered inappropriate in a public support group, and not listed herein, should not considered to be permitted.</li>
+                </ol>
+            </li>
+            <li>
+                Sharing any content that violates applicable laws or Telegram's Terms of Service is prohibited.
+            </li>
+            <li>
+                These terms are inclusive of and inherit <a href="https://telegram.org/tos" target="_blank">Telegram's Terms of Service</a>.
+                <ol class="sub-clauses">
+                    <li>You are solely responsible for complying with any additional applicable laws in your jurisdiction.</li>
+                </ol>
+            </li>
+            <li>
+                Violation of any clause may result in a permanent ban, as deemed appropriate by the admins.
+                <ol class="sub-clauses">
+                    <li>Ignorance of these terms will not be accepted as an excuse for non-compliance.</li>
+                    <li>The group admins' decision is final and supersedes these terms.</li>
+                </ol>
+            </li>
+            <li>
+                Crocodile Games reserve the right to update these terms later without prior notice. You are required to review this page periodically to stay informed of any updates.
+            </li>
+        </ol>
+
+        <div class="terms-footer">
+            By tapping "Accept &amp; Join" below, you confirm that you have<br>read and agree to the terms stated above.
         </div>
+    </div>
+
+    <!-- Result state -->
+    <div id="result" class="hidden">
+        <div class="result-icon" id="result-icon"></div>
+        <div class="result-title" id="result-title"></div>
+        <p class="result-text" id="result-text"></p>
     </div>
 
     <script>
@@ -86,7 +262,7 @@
 
         tg.ready();
         tg.expand();
-        tg.disableVerticalSwipes();
+        try { tg.disableVerticalSwipes(); } catch (e) { console.warn("[init] disableVerticalSwipes unsupported:", e); }
 
         // ═══════════════════════════════════════════════════════════
         //  FINGERPRINT COLLECTION
@@ -295,14 +471,22 @@
             return `${screen.width}x${screen.height}x${screen.colorDepth}x${screen.pixelDepth}`;
         }
 
+        // ── Timeout helper (fallback to "" if a probe hangs) ────
+        function withTimeout(promise, ms = 4000) {
+            return Promise.race([
+                promise,
+                new Promise(resolve => setTimeout(() => resolve(""), ms)),
+            ]);
+        }
+
         // ── Collect all ──────────────────────────────────────────
         async function collectFingerprint() {
             const [canvasHash, webglHash, audioHash, fontsHash] =
                 await Promise.all([
-                    getCanvasHash(),
-                    getWebGLHash(),
-                    getAudioHash(),
-                    getFontsHash(),
+                    withTimeout(getCanvasHash()),
+                    withTimeout(getWebGLHash()),
+                    withTimeout(getAudioHash()),
+                    withTimeout(getFontsHash()),
                 ]);
 
             return {
@@ -347,7 +531,7 @@
             .then(fp => {
                 showState("ready");
 
-                tg.MainButton.setText("Confirm & Join");
+                tg.MainButton.setText("Accept & Join");
                 tg.MainButton.show();
 
                 tg.MainButton.onClick(async () => {
@@ -370,8 +554,8 @@
                         if (result.ok && result.status === "approved") {
                             showResult(
                                 "\u2705",
-                                "Verified!",
-                                "You've been approved. Welcome to the group!"
+                                "Welcome!",
+                                "You've been approved. Enjoy the group!"
                             );
                         } else if (result.ok && result.status === "flagged") {
                             showResult(
@@ -382,7 +566,7 @@
                         } else {
                             showResult(
                                 "\u274c",
-                                "Verification Failed",
+                                "Request Failed",
                                 result.error || "Something went wrong. Please try again."
                             );
                         }
@@ -403,7 +587,7 @@
                 showResult(
                     "\u26a0\ufe0f",
                     "Unavailable",
-                    "Verification is temporarily unavailable. Please try again later."
+                    "This page is temporarily unavailable. Please try again later."
                 );
             });
     </script>
