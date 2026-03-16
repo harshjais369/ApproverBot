@@ -2,12 +2,14 @@
 BACKUP_DIR="backups"
 mkdir -p "$BACKUP_DIR"
 
-# Copy DB from the running container
-docker compose -f ~/ApproverBot/docker-compose.yml \
-    exec -T bot cp /app/data/approverbot.db /tmp/backup.db
+# Create a backup of the DB inside the container
+docker exec approverbot-bot-1 python -c "import sqlite3; \
+    src=sqlite3.connect('/app/data/approverbot.db'); \
+    dst=sqlite3.connect('/tmp/approverbot-backup.db'); \
+    src.backup(dst); dst.close(); src.close(); print('backup done')"
 
-docker compose -f ~/ApproverBot/docker-compose.yml \
-    cp bot:/tmp/backup.db "$BACKUP_DIR/approverbot_$(date +%Y%m%d_%H%M%S).db"
+# Copy DB backup from the running container to host
+docker cp approverbot-bot-1:/tmp/approverbot-backup.db "$BACKUP_DIR/approverbot_$(date +%Y%m%d_%H%M%S).db"
 
 # Keep only last 7 days of backups
 find "$BACKUP_DIR" -name "*.db" -mtime +7 -delete
