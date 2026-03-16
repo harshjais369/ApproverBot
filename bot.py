@@ -398,6 +398,7 @@ def receive_fingerprint():
         client_ip = client_ip.split(",")[0].strip()
 
     fp_record = {
+        "user_id": user_id,
         "full_name": user_full_name,
         "device_id": fingerprint_data.get("deviceId", ""),
         "canvas_hash": fingerprint_data.get("canvasHash", ""),
