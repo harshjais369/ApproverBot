@@ -12,7 +12,7 @@ from telebot.types import (
     WebAppInfo,
     ChatPermissions,
 )
-from flask import Flask, request, render_template, jsonify
+from flask import Flask, request, render_template, jsonify, redirect
 
 from config import *
 import database
@@ -316,6 +316,19 @@ def handle_false_positive(call):
 # ═══════════════════════════════════════════════════════════════════
 #  FLASK ROUTES
 # ═══════════════════════════════════════════════════════════════════
+
+@app.route("/", methods=["GET"])
+def serve_root():
+    """Redirect the website root to the Telegram bot deep link."""
+    return redirect("https://t.me/CrocodileGameEnn_bot", code=302)
+
+
+@app.route("/terms", methods=["GET"])
+@app.route("/tnc", methods=["GET"])
+@app.route("/rules", methods=["GET"])
+def serve_terms_page():
+    """Serve static Terms and Conditions page without WebApp logic."""
+    return render_template("group_terms.html")
 
 @app.route("/verify", methods=["GET"])
 def serve_verify_page():
