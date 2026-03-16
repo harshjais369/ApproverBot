@@ -1,5 +1,5 @@
 #!/bin/bash
-BACKUP_DIR="~/backups"
+BACKUP_DIR="backups"
 mkdir -p "$BACKUP_DIR"
 
 # Copy DB from the running container
