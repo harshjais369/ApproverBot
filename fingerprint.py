@@ -55,41 +55,31 @@ def compare_fingerprints(new_fp: dict, existing_fp: dict) -> Tuple[float, List[s
     total_score = 0.0
     total_weight = 0.0
     matched_components = []
-
     for field_name, weight, comparison_type in COMPONENTS:
         new_val = new_fp.get(field_name)
         existing_val = existing_fp.get(field_name)
-
         # Skip if either value is missing/empty
         if not new_val and new_val != 0:
             continue
         if not existing_val and existing_val != 0:
             continue
-
         total_weight += weight
         match = False
-
         if comparison_type == "exact":
             match = str(new_val).strip() == str(existing_val).strip()
-
         elif comparison_type == "json_array_overlap":
             match = _json_array_overlap(new_val, existing_val) >= 0.8
-
         elif comparison_type == "exact_int_combo":
             # hardware_concurrency + device_memory combined check
             match = (
                 str(new_val).strip() == str(existing_val).strip()
-                and str(new_fp.get("device_memory", "")).strip()
-                    == str(existing_fp.get("device_memory", "")).strip()
+                and str(new_fp.get("device_memory", "")).strip() == str(existing_fp.get("device_memory", "")).strip()
             )
-
         if match:
             total_score += weight
             matched_components.append(field_name)
-
     if total_weight == 0:
         return 0.0, []
-
     normalized_score = total_score / total_weight
     return normalized_score, matched_components
 
@@ -104,23 +94,12 @@ def find_matching_user(
     best_match = None
     best_score = 0.0
     best_components: List[str] = []
-
     for existing_fp in all_existing:
         score, components = compare_fingerprints(new_fp, existing_fp)
-
-        logger.debug(
-            "Fingerprint comparison: user %s vs user %s -> %.0f%% (%s)",
-            new_fp.get("user_id", "?"),
-            existing_fp.get("user_id", "?"),
-            score * 100,
-            ", ".join(components) if components else "none",
-        )
-
         if score > best_score:
             best_score = score
             best_match = existing_fp
             best_components = components
-
     if best_score >= SIMILARITY_THRESHOLD and best_match is not None:
         logger.info(
             "Match found: user %s matches user %s at %.0f%% (%s)",
@@ -130,16 +109,9 @@ def find_matching_user(
             ", ".join(best_components),
         )
         return (best_match, best_score, best_components)
-
     if best_match:
-        logger.info(
-            "Best match for user %s was user %s at %.0f%% (below %.0f%% threshold)",
-            new_fp.get("user_id", "?"),
-            best_match.get("user_id", "?"),
-            best_score * 100,
-            SIMILARITY_THRESHOLD * 100,
-        )
-
+        logger.info("Best match for user %s was user %s at %.0f%% (below %.0f%% threshold)",
+            new_fp.get("user_id", "?"), best_match.get("user_id", "?"), best_score * 100, SIMILARITY_THRESHOLD * 100,)
     return None
 
 
