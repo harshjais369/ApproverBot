@@ -15,7 +15,7 @@ from telebot.types import (
 from flask import Flask, request, render_template, jsonify, redirect
 
 from config import *
-import database
+import database as db
 import fingerprint as fp_module
 import validation
 
@@ -50,12 +50,12 @@ def handle_start(message):
     user_id = message.from_user.id
     first_name = message.from_user.first_name or "there"
     # Check for any restricted (un-verified) pending requests
-    restricted = database.get_restricted_requests(user_id)
+    restricted = db.get_restricted_requests(user_id)
     if restricted:
         for req in restricted:
             token = uuid.uuid4().hex
             expires_at = (datetime.utcnow() + timedelta(minutes=PENDING_REQUEST_TTL_MINUTES)).isoformat()
-            database.update_pending_token(req["id"], token, expires_at)
+            db.update_pending_token(req["id"], token, expires_at)
             verify_url = f"{WEB_BASE_URL}/verify?token={token}"
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton(
@@ -81,7 +81,7 @@ def handle_multis(message):
     """Show how many users have multiple accounts."""
     if not message.from_user.id in SUPERUSERS:
         return
-    clusters = database.get_all_multi_account_clusters()
+    clusters = db.get_all_multi_account_clusters()
     if not clusters:
         bot.reply_to(message, "No multi-account users detected yet.")
         return
@@ -94,7 +94,7 @@ def handle_multis(message):
     for i, cluster in enumerate(sorted(clusters, key=len, reverse=True), 1):
         user_labels = []
         for uid in sorted(cluster):
-            name = database.get_user_name(uid)
+            name = db.get_user_name(uid)
             user_labels.append(f"{name} ({uid})" if name else str(uid))
         lines.append(f"{i}. [{len(cluster)} accounts] {', '.join(user_labels)}")
     bot.reply_to(message, "\n".join(lines))
@@ -114,16 +114,16 @@ def handle_connections(message):
     except ValueError:
         bot.reply_to(message, "Invalid user ID. Must be a number.")
         return
-    connected = database.get_all_connected_users(target_uid)
+    connected = db.get_all_connected_users(target_uid)
     if len(connected) <= 1:
         bot.reply_to(message, f"User {target_uid} has no linked accounts.")
         return
-    details = database.get_connection_details(target_uid)
+    details = db.get_connection_details(target_uid)
     connected_labels = []
     for uid in sorted(connected):
-        name = database.get_user_name(uid)
+        name = db.get_user_name(uid)
         connected_labels.append(f"{name} ({uid})" if name else str(uid))
-    target_name = database.get_user_name(target_uid)
+    target_name = db.get_user_name(target_uid)
     target_label = f"{target_name} ({target_uid})" if target_name else str(target_uid)
     lines = [
         f"Connections for {target_label}",
@@ -136,8 +136,8 @@ def handle_connections(message):
         score = flag["similarity_score"]
         components = flag["matching_components"]
         ts = flag["created_at"]
-        new_name = flag.get("new_user_name") or database.get_user_name(flag["new_user_id"]) or ""
-        matched_name = flag.get("matched_user_name") or database.get_user_name(flag["matched_user_id"]) or ""
+        new_name = flag.get("new_user_name") or db.get_user_name(flag["new_user_id"]) or ""
+        matched_name = flag.get("matched_user_name") or db.get_user_name(flag["matched_user_id"]) or ""
         new_lbl = f"{new_name} ({flag['new_user_id']})" if new_name else str(flag["new_user_id"])
         matched_lbl = f"{matched_name} ({flag['matched_user_id']})" if matched_name else str(flag["matched_user_id"])
         lines.append(
@@ -187,7 +187,7 @@ def handle_join_request(jr):
         bot.send_message(user_id, f"Hi {full_name}! To join the group (@CrocodileGamesGroup), please verify you are not a robot by accepting the terms (rules).",
                         reply_markup=markup)
         # DM succeeded — store as normal pending request
-        database.create_pending_request(
+        db.create_pending_request(
             chat_id=chat_id,
             user_id=user_id,
             user_name=full_name,
@@ -216,7 +216,7 @@ def handle_join_request(jr):
                     ),
                 )
                 # Store as restricted — no token yet, will be assigned on /start
-                database.create_pending_request(
+                db.create_pending_request(
                     chat_id=chat_id,
                     user_id=user_id,
                     user_name=full_name,
@@ -239,6 +239,27 @@ def handle_join_request(jr):
             logger.exception("Telegram API error for join request user %s", user_id)
     except Exception:
         logger.exception("Unexpected error handling join request for user %s", user_id)
+
+
+@bot.message_handler(content_types=["new_chat_members"])
+def handle_new_chat_members(message):
+    """Kick users manually approved while their join request is still pending."""
+    chat_id = message.chat.id
+    if ALLOWED_GROUPS and chat_id not in ALLOWED_GROUPS:
+        return
+    for member in message.new_chat_members or []:
+        user_id = member.id
+        if user_id in SUPERUSERS or user_id == BOT_ID:
+            continue
+        active_pending = db.get_active_pending_request(chat_id, user_id)
+        if not active_pending:
+            continue
+        try:
+            bot.ban_chat_member(chat_id, user_id)
+            bot.unban_chat_member(chat_id, user_id, only_if_banned=True)
+            logger.warning("Removed user %s from chat %s: manually approved while verification pending", user_id, chat_id)
+        except Exception:
+            logger.exception("Failed to remove manually approved pending user %s from chat %s", user_id, chat_id)
 
 
 # ── Admin callback handlers ───────────────────────────────────────
@@ -305,7 +326,7 @@ def handle_false_positive(call):
         return
     parts = call.data.split(":")
     new_uid, matched_uid = int(parts[1]), int(parts[2])
-    database.mark_false_positive(new_uid, matched_uid)
+    db.mark_false_positive(new_uid, matched_uid)
     bot.edit_message_text(
         call.message.text + "\n\n--- FALSE POSITIVE marked by admin ---",
         call.message.chat.id,
@@ -337,7 +358,7 @@ def serve_verify_page():
     if not token:
         return "Missing verification token.", 400
 
-    pending = database.get_pending_request(token)
+    pending = db.get_pending_request(token)
     if not pending:
         return "This verification link has expired or is invalid.", 404
 
@@ -350,27 +371,22 @@ def receive_fingerprint():
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"ok": False, "error": "Invalid JSON"}), 400
-
     init_data_raw = data.get("initData", "")
     fingerprint_data = data.get("fingerprint", {})
     token = data.get("token", "")
-
     # 1. Validate initData
     validated = validation.validate_init_data(init_data_raw)
     if validated is None:
         logger.warning("initData validation failed for token %s", token)
         return jsonify({"ok": False, "error": "Validation failed"}), 403
-
     # 2. Extract user_id
     tg_user_id = validation.extract_user_id(validated)
     if tg_user_id is None:
         return jsonify({"ok": False, "error": "No user ID in initData"}), 400
-
     # 3. Look up pending request
-    pending = database.get_pending_request(token)
+    pending = db.get_pending_request(token)
     if not pending:
         return jsonify({"ok": False, "error": "Token expired or invalid"}), 404
-
     # 4. Verify user_id matches
     if tg_user_id != pending["user_id"]:
         logger.warning(
@@ -378,10 +394,8 @@ def receive_fingerprint():
             tg_user_id, pending["user_id"],
         )
         return jsonify({"ok": False, "error": "User mismatch"}), 403
-
     chat_id = pending["chat_id"]
     user_id = pending["user_id"]
-
     # 5. Extract user's full name from initData
     user_full_name = ""
     try:
@@ -391,12 +405,10 @@ def receive_fingerprint():
         user_full_name = f"{first} {last}".strip() if last else first
     except (json.JSONDecodeError, TypeError):
         pass
-
     # 6. Build fingerprint record with server-side IP
     client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
     if client_ip and "," in client_ip:
         client_ip = client_ip.split(",")[0].strip()
-
     fp_record = {
         "user_id": user_id,
         "full_name": user_full_name,
@@ -420,7 +432,7 @@ def receive_fingerprint():
 
     # ── STEP 0: Check if user is already linked (permanent link) ──
     # Once flagged, always flagged — regardless of current fingerprint.
-    existing_link = database.find_existing_link(user_id)
+    existing_link = db.find_existing_link(user_id)
     if existing_link:
         # Determine the other user in this link
         matched_user_id = (
@@ -428,8 +440,8 @@ def receive_fingerprint():
             if existing_link["new_user_id"] == user_id
             else existing_link["new_user_id"]
         )
-        database.upsert_fingerprint(user_id, fp_record)
-        database.mark_pending_completed(token)
+        db.upsert_fingerprint(user_id, fp_record)
+        db.mark_pending_completed(token)
         # Silently approve — no alert for known linked accounts re-joining
         try:
             bot.approve_chat_join_request(chat_id, user_id)
@@ -443,58 +455,43 @@ def receive_fingerprint():
         return jsonify({"ok": True, "status": "approved"})
 
     # ── STEP 1: Fast-path #1 — device_id (same Telegram app) ─────
-    device_id_match = fp_module.check_device_id_match(
-        fp_record["device_id"], user_id, database
-    )
-
+    device_id_match = fp_module.check_device_id_match(fp_record["device_id"], user_id, db)
     if device_id_match:
         matched_user_id = device_id_match["user_id"]
-        matched_name = database.get_user_name(matched_user_id) or ""
-        database.upsert_fingerprint(user_id, fp_record)
-        database.record_flag(
-            user_id, matched_user_id, 1.0, ["device_id"], "flagged", chat_id,
-            new_user_name=user_full_name, matched_user_name=matched_name,
-        )
-        database.mark_pending_completed(token)
+        matched_name = db.get_user_name(matched_user_id) or ""
+        db.upsert_fingerprint(user_id, fp_record)
+        db.record_flag(user_id, matched_user_id, 1.0, ["device_id"], "flagged", chat_id,
+            new_user_name=user_full_name, matched_user_name=matched_name,)
+        db.mark_pending_completed(token)
         _handle_flag_result(chat_id, user_id, matched_user_id, 1.0, ["device_id"],
                             new_user_name=user_full_name, matched_user_name=matched_name)
         return jsonify({"ok": True, "status": "flagged"})
 
     # ── STEP 2: Fast-path #2 — ip_address (same network) ─────────
-    ip_match = fp_module.check_ip_match(
-        fp_record["ip_address"], user_id, database
-    )
-
+    ip_match = fp_module.check_ip_match(fp_record["ip_address"], user_id, db)
     if ip_match:
         matched_user_id = ip_match["user_id"]
-        matched_name = database.get_user_name(matched_user_id) or ""
-        database.upsert_fingerprint(user_id, fp_record)
-        database.record_flag(
-            user_id, matched_user_id, 1.0, ["ip_address"], "flagged", chat_id,
-            new_user_name=user_full_name, matched_user_name=matched_name,
-        )
-        database.mark_pending_completed(token)
+        matched_name = db.get_user_name(matched_user_id) or ""
+        db.upsert_fingerprint(user_id, fp_record)
+        db.record_flag(user_id, matched_user_id, 1.0, ["ip_address"], "flagged", chat_id,
+            new_user_name=user_full_name, matched_user_name=matched_name,)
+        db.mark_pending_completed(token)
         _handle_flag_result(chat_id, user_id, matched_user_id, 1.0, ["ip_address"],
                             new_user_name=user_full_name, matched_user_name=matched_name)
         return jsonify({"ok": True, "status": "flagged"})
 
     # ── STEP 3: Full weighted comparison ──────────────────────────
-    all_existing = database.get_all_fingerprints_except(user_id)
+    all_existing = db.get_all_fingerprints_except(user_id)
     match_result = fp_module.find_matching_user(fp_record, all_existing)
-
-    # Store fingerprint regardless
-    database.upsert_fingerprint(user_id, fp_record)
-    database.mark_pending_completed(token)
-
+    db.upsert_fingerprint(user_id, fp_record)
+    db.mark_pending_completed(token)
     if match_result:
         matched_fp, score, components = match_result
         matched_user_id = matched_fp["user_id"]
-        matched_name = database.get_user_name(matched_user_id) or ""
+        matched_name = db.get_user_name(matched_user_id) or ""
         action = "declined" if AUTO_DECLINE_ON_MATCH else "flagged"
-        database.record_flag(
-            user_id, matched_user_id, score, components, action, chat_id,
-            new_user_name=user_full_name, matched_user_name=matched_name,
-        )
+        db.record_flag(user_id, matched_user_id, score, components, action, chat_id,
+            new_user_name=user_full_name, matched_user_name=matched_name,)
         _handle_flag_result(chat_id, user_id, matched_user_id, score, components,
                             new_user_name=user_full_name, matched_user_name=matched_name)
         return jsonify({"ok": True, "status": "flagged"})
@@ -531,10 +528,7 @@ def _unrestrict_user(chat_id: int, user_id: int):
             ),
         )
     except Exception:
-        logger.warning(
-            "Could not unrestrict user %s in chat %s",
-            user_id, chat_id,
-        )
+        logger.warning("Could not unrestrict user %s in chat %s", user_id, chat_id)
 
 
 def _handle_flag_result(
@@ -550,10 +544,7 @@ def _handle_flag_result(
     if AUTO_DECLINE_ON_MATCH:
         try:
             bot.decline_chat_join_request(chat_id, new_user_id)
-            logger.info(
-                "Auto-declined user %s (matched %s, score %.2f)",
-                new_user_id, matched_user_id, score,
-            )
+            logger.info("Auto-declined user %s (matched %s, score %.2f)", new_user_id, matched_user_id, score)
         except Exception:
             logger.exception("Failed to decline user %s", new_user_id)
     else:
@@ -588,12 +579,12 @@ def _notify_admin(
     new_label = f"{new_user_name} ({new_user_id})" if new_user_name else str(new_user_id)
     matched_label = f"{matched_user_name} ({matched_user_id})" if matched_user_name else str(matched_user_id)
     # Show total linked accounts if this is part of a larger cluster
-    connected = database.get_all_connected_users(new_user_id)
+    connected = db.get_all_connected_users(new_user_id)
     cluster_info = ""
     if len(connected) > 2:
         cluster_labels = []
         for uid in sorted(connected):
-            name = database.get_user_name(uid)
+            name = db.get_user_name(uid)
             cluster_labels.append(f"{name} ({uid})" if name else str(uid))
         cluster_info = (
             f"\nCluster: {len(connected)} linked accounts total"
@@ -646,11 +637,11 @@ def run_flask():
 
 
 if __name__ == "__main__":
-    database.init_db()
+    db.init_db()
     logger.info("Database initialized")
 
     # Expire any stale pending requests
-    expired = database.expire_stale_requests()
+    expired = db.expire_stale_requests()
     if expired:
         logger.info("Expired %d stale pending requests", expired)
 
@@ -660,8 +651,9 @@ if __name__ == "__main__":
     logger.info("Flask server started on %s:%s", WEB_HOST, WEB_PORT)
 
     # Start bot polling on main thread
-    BOT_USERNAME = bot.get_me().username.removeprefix("@")
-    logger.info("Started bot as @%s", BOT_USERNAME)
+    me = bot.get_me()
+    BOT_ID, BOT_USERNAME = me.id, me.username.removeprefix("@")
+    logger.info("[PROD] Started bot as @%s (%s)", BOT_USERNAME, BOT_ID)
     bot.infinity_polling(
         timeout=60,
         long_polling_timeout=60,

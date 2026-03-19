@@ -100,6 +100,19 @@ def get_pending_request(token: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def get_active_pending_request(chat_id: int, user_id: int) -> Optional[dict]:
+    """Return latest non-expired pending request for a specific chat/user."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM pending_requests "
+        "WHERE chat_id = ? AND user_id = ? AND status = 'pending' "
+        "AND (expires_at IS NULL OR expires_at > datetime('now')) "
+        "ORDER BY id DESC LIMIT 1",
+        (chat_id, user_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def get_restricted_requests(user_id: int) -> List[dict]:
     conn = _get_conn()
     rows = conn.execute(
