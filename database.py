@@ -52,6 +52,7 @@ def init_db() -> None:
             hardware_concurrency INTEGER,
             fonts_hash TEXT,
             raw_data TEXT,
+            ip_info TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -75,6 +76,15 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_flags_matched ON flags(matched_user_id);
     """)
     conn.commit()
+
+    # TODO: Remove migration code after it has been deployed once
+    # Add ip_info column to fingerprints if it doesn't exist (migration for existing DBs)
+    try:
+        conn.execute("ALTER TABLE fingerprints ADD COLUMN ip_info TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        # Column already exists
+        pass
 
 
 # ── Pending Requests ──────────────────────────────────────────────
@@ -164,7 +174,7 @@ def upsert_fingerprint(user_id: int, fp: dict) -> int:
                 ip_address=?, screen_resolution=?, user_agent=?, platform=?,
                 languages=?, timezone=?, timezone_offset=?, touch_points=?,
                 device_memory=?, hardware_concurrency=?, fonts_hash=?,
-                raw_data=?, updated_at=datetime('now')
+                raw_data=?, ip_info=?, updated_at=datetime('now')
             WHERE user_id=?
         """, (
             fp.get("full_name"), fp.get("device_id"), fp.get("canvas_hash"),
@@ -173,7 +183,7 @@ def upsert_fingerprint(user_id: int, fp: dict) -> int:
             fp.get("languages"), fp.get("timezone"), fp.get("timezone_offset"),
             fp.get("touch_points"), fp.get("device_memory"),
             fp.get("hardware_concurrency"), fp.get("fonts_hash"),
-            fp.get("raw_data"), user_id,
+            fp.get("raw_data"), fp.get("ip_info"), user_id,
         ))
         conn.commit()
         return existing["id"]
@@ -183,8 +193,8 @@ def upsert_fingerprint(user_id: int, fp: dict) -> int:
                 user_id, full_name, device_id, canvas_hash, webgl_hash, audio_hash,
                 ip_address, screen_resolution, user_agent, platform,
                 languages, timezone, timezone_offset, touch_points,
-                device_memory, hardware_concurrency, fonts_hash, raw_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                device_memory, hardware_concurrency, fonts_hash, raw_data, ip_info
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             user_id, fp.get("full_name"), fp.get("device_id"), fp.get("canvas_hash"),
             fp.get("webgl_hash"), fp.get("audio_hash"), fp.get("ip_address"),
@@ -192,7 +202,7 @@ def upsert_fingerprint(user_id: int, fp: dict) -> int:
             fp.get("languages"), fp.get("timezone"), fp.get("timezone_offset"),
             fp.get("touch_points"), fp.get("device_memory"),
             fp.get("hardware_concurrency"), fp.get("fonts_hash"),
-            fp.get("raw_data"),
+            fp.get("raw_data"), fp.get("ip_info"),
         ))
         conn.commit()
         return cur.lastrowid

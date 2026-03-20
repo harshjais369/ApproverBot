@@ -1,15 +1,74 @@
 import json
 import logging
 from typing import Optional, Tuple, List
+import requests
 from config import (
     SIMILARITY_THRESHOLD, DEVICE_ID_AUTO_FLAG,
     WEIGHT_CANVAS_HASH, WEIGHT_WEBGL_HASH,
     WEIGHT_AUDIO_HASH, WEIGHT_SCREEN,
     WEIGHT_USER_AGENT, WEIGHT_PLATFORM, WEIGHT_LANGUAGES,
-    WEIGHT_TIMEZONE, WEIGHT_HARDWARE, WEIGHT_FONTS,
+    WEIGHT_TIMEZONE, WEIGHT_HARDWARE, WEIGHT_FONTS, WEIGHT_IP_INFO,
 )
 
 logger = logging.getLogger("approverbot")
+
+def fetch_ip_geolocation(ip_address: str, timeout: int = 3) -> Optional[dict]:
+    """
+    Fetch IP geolocation data from ip-api.com.
+    Args:
+        ip_address: IPv4 or IPv6 address to look up
+        timeout: Request timeout in seconds (default 3)
+    Returns:
+        Dict with keys: {"isp": "...", "location": "...", "mobile": bool}
+        or None if request fails, times out, or API returns error
+    """
+    if not ip_address: return None
+    try:
+        url = f"http://ip-api.com/json/{ip_address}?fields=status,message,country," \
+            "countryCode,region,regionName,city,district,zip,lat,lon,timezone,isp,org,as,asname,mobile,hosting,query"
+        response = requests.get(url, timeout=timeout)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("status") == "success":
+            city = data.get("city", "").strip()
+            region = data.get("regionName", "").strip()
+            country = data.get("country", "").strip()
+            location_parts = [p for p in [city, region, country] if p]
+            location = ", ".join(location_parts) if location_parts else ""
+            return {
+                "isp": data.get("isp", "").strip(),
+                "location": location,
+                "mobile": bool(data.get("mobile", False))
+            }
+        else:
+            logger.info("IP geolocation API returned error for %s: %s", ip_address, data.get("message", "unknown"))
+    except requests.exceptions.Timeout:
+        logger.warning("IP geolocation request timed out for %s (timeout=%ds)", ip_address, timeout)
+    except requests.exceptions.RequestException as e:
+        logger.warning("IP geolocation request failed for %s: %s", ip_address, str(e))
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning("Failed to parse IP geolocation response for %s: %s", ip_address, str(e))
+    except Exception as e:
+        logger.warning("Unexpected error fetching IP geolocation for %s: %s", ip_address, str(e))
+    return None
+
+def _compare_ip_info(ip_info_a, ip_info_b) -> bool:
+    """
+    Compare two ip_info JSON objects for exact match.
+    Both ISP, location, and mobile status must match exactly.
+    """
+    if not ip_info_a or not ip_info_b:
+        return False
+    try:
+        data_a = json.loads(ip_info_a) if isinstance(ip_info_a, str) else ip_info_a
+        data_b = json.loads(ip_info_b) if isinstance(ip_info_b, str) else ip_info_b
+        return (
+            data_a.get("isp") == data_b.get("isp")
+            and data_a.get("location") == data_b.get("location")
+            and data_a.get("mobile") == data_b.get("mobile")
+        )
+    except (json.JSONDecodeError, TypeError):
+        return False
 
 # Components for weighted similarity scoring.
 # device_id and ip_address are handled separately as fast-paths:
@@ -28,6 +87,7 @@ COMPONENTS = [
     ("timezone",             WEIGHT_TIMEZONE,      "exact"),
     ("hardware_concurrency", WEIGHT_HARDWARE,      "exact_int_combo"),
     ("fonts_hash",           WEIGHT_FONTS,         "exact"),
+    ("ip_info",              WEIGHT_IP_INFO,       "json_object_exact"),
 ]
 
 
@@ -75,6 +135,9 @@ def compare_fingerprints(new_fp: dict, existing_fp: dict) -> Tuple[float, List[s
                 str(new_val).strip() == str(existing_val).strip()
                 and str(new_fp.get("device_memory", "")).strip() == str(existing_fp.get("device_memory", "")).strip()
             )
+        elif comparison_type == "json_object_exact":
+            # ip_info: exact match on all 3 fields (isp, location, mobile)
+            match = _compare_ip_info(new_val, existing_val)
         if match:
             total_score += weight
             matched_components.append(field_name)

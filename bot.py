@@ -406,9 +406,10 @@ def receive_fingerprint():
     except (json.JSONDecodeError, TypeError):
         pass
     # 6. Build fingerprint record with server-side IP
-    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-    if client_ip and "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    client_ip, ip_info = request.headers.get("X-Forwarded-For", request.remote_addr), None
+    if client_ip:
+        client_ip = client_ip.split(",")[0].strip() if "," in client_ip else client_ip
+        ip_info = fp_module.fetch_ip_geolocation(client_ip) # Fetch IP geolocation data
     fp_record = {
         "user_id": user_id,
         "full_name": user_full_name,
@@ -428,6 +429,7 @@ def receive_fingerprint():
         "hardware_concurrency": fingerprint_data.get("hardwareConcurrency"),
         "fonts_hash": fingerprint_data.get("fontsHash", ""),
         "raw_data": json.dumps(fingerprint_data),
+        "ip_info": json.dumps(ip_info) if ip_info else None,
     }
 
     # ── STEP 0: Check if user is already linked (permanent link) ──
