@@ -77,15 +77,6 @@ def init_db() -> None:
     """)
     conn.commit()
 
-    # TODO: Remove migration code after it has been deployed once
-    # Add ip_info column to fingerprints if it doesn't exist (migration for existing DBs)
-    try:
-        conn.execute("ALTER TABLE fingerprints ADD COLUMN ip_info TEXT")
-        conn.commit()
-    except sqlite3.OperationalError:
-        # Column already exists
-        pass
-
 
 # ── Pending Requests ──────────────────────────────────────────────
 
