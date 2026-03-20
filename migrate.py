@@ -245,7 +245,7 @@ class DatabaseMigrator:
             logger.error(f"  [ERROR] Failed to reorder columns: {e}")
             raise
 
-
+    def get_fingerprints_without_ip_info(self) -> List[Dict]:
         """Get all fingerprints with ip_address but missing ip_info."""
         conn = self.connect()
         rows = conn.execute(
