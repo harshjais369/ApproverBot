@@ -287,29 +287,24 @@ def get_all_connected_users(user_id: int) -> set:
     If A↔B and B↔C, then get_all_connected_users(A) returns {A, B, C}.
     Excludes false_positive flags.
     """
-    conn = _get_conn()
-    visited = set()
-    queue = [user_id]
-
-    while queue:
-        current = queue.pop(0)
-        if current in visited:
-            continue
-        visited.add(current)
-
-        rows = conn.execute(
-            "SELECT new_user_id, matched_user_id FROM flags "
-            "WHERE (new_user_id = ? OR matched_user_id = ?) "
-            "AND action_taken != 'false_positive'",
-            (current, current),
-        ).fetchall()
-
-        for row in rows:
-            for uid in [row["new_user_id"], row["matched_user_id"]]:
-                if uid not in visited:
-                    queue.append(uid)
-
-    return visited
+    rows = _get_conn().execute(
+        "WITH RECURSIVE connected(uid) AS ("
+        "  VALUES (?) "
+        "  UNION "
+        "  SELECT f.matched_user_id "
+        "  FROM flags f "
+        "  JOIN connected c ON f.new_user_id = c.uid "
+        "  WHERE f.action_taken != 'false_positive' "
+        "  UNION "
+        "  SELECT f.new_user_id "
+        "  FROM flags f "
+        "  JOIN connected c ON f.matched_user_id = c.uid "
+        "  WHERE f.action_taken != 'false_positive'"
+        ") "
+        "SELECT uid FROM connected",
+        (user_id,),
+    )
+    return {row[0] for row in rows}
 
 
 def get_all_multi_account_clusters() -> list:
