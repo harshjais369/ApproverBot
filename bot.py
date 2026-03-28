@@ -663,5 +663,6 @@ if __name__ == "__main__":
             "message",
             "callback_query",
             "chat_join_request",
+            "new_chat_members",
         ],
     )
