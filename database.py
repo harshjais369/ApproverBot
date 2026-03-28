@@ -29,8 +29,8 @@ def init_db() -> None:
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             expires_at TEXT
         );
-        CREATE INDEX IF NOT EXISTS idx_pending_token ON pending_requests(token);
         CREATE INDEX IF NOT EXISTS idx_pending_user ON pending_requests(user_id, status);
+        CREATE INDEX IF NOT EXISTS idx_pending_chat_user_id ON pending_requests(chat_id, user_id, id DESC);
 
         CREATE TABLE IF NOT EXISTS fingerprints (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,7 +95,7 @@ def create_pending_request(chat_id: int, user_id: int, user_name: str = None,
 def get_pending_request(token: str) -> Optional[dict]:
     conn = _get_conn()
     row = conn.execute(
-        "SELECT * FROM pending_requests WHERE token = ? AND status = 'pending' AND (expires_at IS NULL OR expires_at > datetime('now'))",
+        "SELECT * FROM pending_requests WHERE token = ? AND status = 'pending' AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))",
         (token,),
     ).fetchone()
     return dict(row) if row else None
@@ -143,7 +143,7 @@ def mark_pending_completed(token: str) -> None:
 def expire_stale_requests() -> int:
     conn = _get_conn()
     cur = conn.execute(
-        "UPDATE pending_requests SET status = 'expired' WHERE expires_at < datetime('now') AND status = 'pending'"
+        "UPDATE pending_requests SET status = 'expired' WHERE status = 'pending' AND expires_at IS NOT NULL AND julianday(expires_at) <= julianday('now')"
     )
     conn.commit()
     return cur.rowcount
