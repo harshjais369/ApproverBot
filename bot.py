@@ -12,6 +12,7 @@ from telebot.types import (
     WebAppInfo,
     ChatPermissions,
 )
+from telebot.util import escape
 from flask import Flask, request, render_template, jsonify, redirect
 
 from config import *
@@ -30,7 +31,7 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("TeleBot").setLevel(logging.WARNING)
 
-bot = telebot.TeleBot(BOT_TOKEN, allow_sending_without_reply=True)
+bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML', allow_sending_without_reply=True, disable_web_page_preview=True)
 app = Flask(__name__)
 
 
@@ -45,35 +46,31 @@ def handle_start(message):
     entries (they joined group but couldn't be DM'd), and sends them
     a verification link now.
     """
-    if message.chat.type != "private":
+    if message.chat.type != 'private':
         return
     user_id = message.from_user.id
-    first_name = message.from_user.first_name or "there"
+    first_name = escape(message.from_user.first_name) or 'there'
     # Check for any restricted (un-verified) pending requests
     restricted = db.get_restricted_requests(user_id)
     if restricted:
         for req in restricted:
             token = uuid.uuid4().hex
             expires_at = (datetime.utcnow() + timedelta(minutes=PENDING_REQUEST_TTL_MINUTES)).isoformat()
-            db.update_pending_token(req["id"], token, expires_at)
-            verify_url = f"{WEB_BASE_URL}/verify?token={token}"
+            db.update_pending_token(req['id'], token, expires_at)
+            verify_url = f'{WEB_BASE_URL}/verify?token={token}'
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton(
-                text="\U0001f513 Verify to Access Chat",
+                text='\U0001f513 Verify to Access Chat',
                 web_app=WebAppInfo(url=verify_url),
             ))
             markup.add(InlineKeyboardButton(
-                text="🔙 Return to Group",
-                url=f"https://t.me/CrocodileGamesGroup",
+                text='🔙 Return to Group',
+                url=f'https://t.me/CrocodileGamesGroup',
             ))
-            bot.send_message(
-                user_id,
-                f"Hi {first_name}!\nYou joined Crocodile Games group but haven't verified yet. "
-                "Complete verification to get access (send messages, stickers, etc.) to the group.",
-                reply_markup=markup,
-            )
+            bot.send_message(user_id, f'Hi <b>{first_name}</b>!\nYou\'ve joined <b>Crocodile Games</b> group but haven\'t verified yet. '
+                             'Complete verification to get access <i>(send messages, stickers, etc.)</i> to the group.', reply_markup=markup)
         return
-    bot.send_message(user_id, f"Hi {first_name}!\nI'm a verification bot built by Crocodile Games (@CrocodileGames).")
+    bot.send_message(user_id, f'Hi {first_name}!\nI\'m a verification bot built by <b>Crocodile Games</b> (@CrocodileGames).')
 
 
 @bot.message_handler(commands=["multis"])
@@ -83,68 +80,76 @@ def handle_multis(message):
         return
     clusters = db.get_all_multi_account_clusters()
     if not clusters:
-        bot.reply_to(message, "No multi-account users detected yet.")
+        bot.reply_to(message, 'No multi-account users detected yet. Great job everyone! 🎉')
         return
     total_accounts = sum(len(c) for c in clusters)
     lines = [
-        f"Multi-account clusters: {len(clusters)}",
-        f"Total accounts involved: {total_accounts}",
-        "",
+        f'<b>Multi-account clusters:</b> <code>{len(clusters)}</code>',
+        f'<b>Total accounts captured:</b> <code>{total_accounts}</code>',
+        '',
     ]
     for i, cluster in enumerate(sorted(clusters, key=len, reverse=True), 1):
         user_labels = []
         for uid in sorted(cluster):
-            name = db.get_user_name(uid)
-            user_labels.append(f"{name} ({uid})" if name else str(uid))
-        lines.append(f"{i}. [{len(cluster)} accounts] {', '.join(user_labels)}")
-    bot.reply_to(message, "\n".join(lines))
+            name = escape(db.get_user_name(uid) or f'[id: {str(uid)}]')
+            user_labels.append(f'<a href="tg://openmessage?user_id={uid}">{name}</a>')
+        lines.append(f'<blockquote expandable><b>{i}. [{len(cluster)} accounts]</b>\n{"  <b>▏</b>".join(user_labels)}</blockquote>')
+    bot.reply_to(message, '\n'.join(lines))
 
 
-@bot.message_handler(commands=["connections"])
+@bot.message_handler(commands=["connections", "conns", "links"])
 def handle_connections(message):
-    """Show all connections for a specific user: /connections <user_id>"""
+    """Show all connections/links for a specific user, along with detection history."""
     if not message.from_user.id in SUPERUSERS:
         return
     parts = message.text.split()
-    if len(parts) < 2:
-        bot.reply_to(message, "Usage: /connections <user_id>")
-        return
-    try:
-        target_uid = int(parts[1])
-    except ValueError:
-        bot.reply_to(message, "Invalid user ID. Must be a number.")
+    target_uid = None
+    if len(parts) >= 2:
+        try:
+            target_uid = int(parts[1])
+        except ValueError:
+            bot.reply_to(message, 'Invalid user ID!')
+            return
+    elif message.reply_to_message:
+        target_uid = message.reply_to_message.from_user.id
+    else:
+        bot.reply_to(message, '<b>Usage:</b> /links &lt;user_id&gt; | reply to user', parse_mode="HTML")
         return
     connected = db.get_all_connected_users(target_uid)
     if len(connected) <= 1:
-        bot.reply_to(message, f"User {target_uid} has no linked accounts.")
+        bot.reply_to(message, f'User {target_uid} has no linked accounts.')
         return
     details = db.get_connection_details(target_uid)
+    target_name = escape(db.get_user_name(target_uid) or f'[id: {str(target_uid)}]')
     connected_labels = []
     for uid in sorted(connected):
-        name = db.get_user_name(uid)
-        connected_labels.append(f"{name} ({uid})" if name else str(uid))
-    target_name = db.get_user_name(target_uid)
-    target_label = f"{target_name} ({target_uid})" if target_name else str(target_uid)
+        name = escape(db.get_user_name(uid) or f'[id: {str(uid)}]')
+        connected_labels.append(f'<a href="tg://openmessage?user_id={uid}">{name}</a>')
     lines = [
-        f"Connections for {target_label}",
-        f"Linked accounts ({len(connected)}): {', '.join(connected_labels)}",
-        "",
-        "Detection history:",
+        f'<b>Connections for <a href="tg://openmessage?user_id={target_uid}">{target_name}</a>:</b>\n',
+        f'<b>Linked accounts ({len(connected)}):</b>\n<blockquote>• {"\n• ".join(connected_labels)}</blockquote>',
+        '',
+        '<b>Detection history:</b>',
     ]
     for flag in details:
-        status = flag["action_taken"]
-        score = flag["similarity_score"]
-        components = flag["matching_components"]
-        ts = flag["created_at"]
-        new_name = flag.get("new_user_name") or db.get_user_name(flag["new_user_id"]) or ""
-        matched_name = flag.get("matched_user_name") or db.get_user_name(flag["matched_user_id"]) or ""
-        new_lbl = f"{new_name} ({flag['new_user_id']})" if new_name else str(flag["new_user_id"])
-        matched_lbl = f"{matched_name} ({flag['matched_user_id']})" if matched_name else str(flag["matched_user_id"])
+        status = flag["action_taken"] or 'N/A'
+        score = flag["similarity_score"] or 0.0
+        components = (flag["matching_components"] or 'N/A').removeprefix('[').removesuffix(']').replace('"', '')
+        ts = flag["created_at"] or 'N/A'
+        new_name = escape(flag.get("new_user_name") or db.get_user_name(flag["new_user_id"]) or f'[id: {flag["new_user_id"]}]')
+        matched_name = escape(flag.get("matched_user_name") or db.get_user_name(flag["matched_user_id"]) or f'[id: {flag["matched_user_id"]}]')
+        new_lbl = f'<a href="tg://openmessage?user_id={flag["new_user_id"]}">{new_name}</a>'
+        matched_lbl = f'<a href="tg://openmessage?user_id={flag["matched_user_id"]}">{matched_name}</a>'
         lines.append(
-            f"  {new_lbl} <-> {matched_lbl} "
-            f"| {score:.0%} | {components} | {status} | {ts}"
+            '<blockquote expandable>'
+            f'<b>{new_lbl} &lt;-&gt; {matched_lbl}</b>\n'
+            f'<b>Similarity:</b> {score:.0%}\n'
+            f'<b>Action:</b> {status.upper()}\n'
+            f'<b>Signals:</b> <i>{components}</i>\n'
+            f'<b>Time:</b> {ts}'
+            '</blockquote>'
         )
-    bot.reply_to(message, "\n".join(lines))
+    bot.reply_to(message, '\n'.join(lines))
 
 
 @bot.chat_join_request_handler()
@@ -155,17 +160,17 @@ def handle_join_request(jr):
     """
     chat_id = jr.chat.id
     user_id = jr.from_user.id
-    full_name = jr.from_user.first_name + (" " + jr.from_user.last_name if jr.from_user.last_name else "")
+    full_name = jr.from_user.first_name + (' ' + jr.from_user.last_name if jr.from_user.last_name else '')
     if ALLOWED_GROUPS and chat_id not in ALLOWED_GROUPS:
-        logger.debug("Ignoring join request from non-allowed group %s", chat_id)
+        logger.debug('Ignoring join request from non-allowed group %s', chat_id)
         return
     if user_id in SUPERUSERS:
         # Auto-approve superusers without DM
         try:
             bot.approve_chat_join_request(chat_id, user_id)
-            logger.info("Auto-approved superuser %s for chat %s", user_id, chat_id)
+            logger.info('Auto-approved superuser %s for chat %s', user_id, chat_id)
         except Exception:
-            logger.exception("Failed to approve superuser %s", user_id)
+            logger.exception('Failed to approve superuser %s', user_id)
         return
     token = uuid.uuid4().hex
     expires_at = (
@@ -174,18 +179,18 @@ def handle_join_request(jr):
     ).isoformat()
     try:
         # Try to DM the user with a verification link
-        verify_url = f"{WEB_BASE_URL}/verify?token={token}"
+        verify_url = f'{WEB_BASE_URL}/verify?token={token}'
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(
-            text="\U0001f513 I'm not a robot",
+            text='\U0001f513 I\'m not a robot',
             web_app=WebAppInfo(url=verify_url),
         ))
         markup.add(InlineKeyboardButton(
-            text="🔙 Return to Group",
-            url=f"https://t.me/CrocodileGamesGroup",
+            text='🔙 Return to Group',
+            url=f'https://t.me/CrocodileGamesGroup',
         ))
-        bot.send_message(user_id, f"Hi {full_name}! To join the group (@CrocodileGamesGroup), please verify you are not a robot by accepting the terms (rules).",
-                        reply_markup=markup)
+        bot.send_message(user_id, f'Hi <b>{escape(full_name)}</b>!\nTo join the group <i>(@CrocodileGamesGroup)</i>, '
+                         'please <b>verify you are not a robot</b> by accepting the terms (rules).', reply_markup=markup)
         # DM succeeded — store as normal pending request
         db.create_pending_request(
             chat_id=chat_id,
@@ -193,21 +198,27 @@ def handle_join_request(jr):
             user_name=full_name,
             token=token,
             expires_at=expires_at,
-            status="pending",
+            status='pending',
         )
-        logger.info("Sent verification DM to user %s for chat %s", user_id, chat_id)
+        logger.info('Sent verification DM to user %s for chat %s', user_id, chat_id)
     except telebot.apihelper.ApiTelegramException as e:
         err_msg = str(e).lower()
-        if "bot can't initiate conversation" in err_msg or "chat not found" in err_msg or "forbidden" in err_msg:
+        if 'bot can\'t initiate conversation' in err_msg or 'chat not found' in err_msg or 'forbidden' in err_msg:
             # User never started the bot — approve but restrict (mute)
-            logger.warning(
-                "Cannot DM user %s — approving with restrictions", user_id
-            )
+            logger.warning('Cannot DM user %s — approving with restrictions', user_id)
             try:
+                # Persist restricted state before approval to avoid race with new_chat_members event.
+                db.create_pending_request(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    user_name=full_name,
+                    token=None,
+                    expires_at=None,
+                    status='restricted',
+                )
                 bot.approve_chat_join_request(chat_id, user_id)
                 bot.restrict_chat_member(
-                    chat_id,
-                    user_id,
+                    chat_id, user_id,
                     permissions=ChatPermissions(
                         can_send_messages=False,
                         can_send_media_messages=False,
@@ -215,30 +226,21 @@ def handle_join_request(jr):
                         can_add_web_page_previews=False,
                     ),
                 )
-                # Store as restricted — no token yet, will be assigned on /start
-                db.create_pending_request(
-                    chat_id=chat_id,
-                    user_id=user_id,
-                    user_name=full_name,
-                    token=None,
-                    expires_at=None,
-                    status="restricted",
-                )
                 sleep(1)
                 # Send message in the group with mention to user prompting to complete verification
                 markup = InlineKeyboardMarkup([[InlineKeyboardButton(
-                        text="\U0001f513 Verify",
-                        url=f"https://t.me/{BOT_USERNAME}?start=verifyInChat{chat_id}_{user_id}",
+                        text='\U0001f513 Verify',
+                        url=f'https://t.me/{BOT_USERNAME}?start=verifyInChat{chat_id}_{user_id}',
                 )]])
-                full_name = full_name if len(full_name) <= 25 else full_name[:22] + "..."
-                bot.send_message(chat_id, f'Hi {full_name}!\nTo access this chat, please DM me to verify you are not a robot by accepting the terms (rules).',
-                                 reply_markup=markup)
+                name_mention = f'<a href="tg://user?id={user_id}">{escape(full_name if len(full_name) <= 25 else full_name[:22] + "...")}</a>'
+                bot.send_message(chat_id, f'Hi <b>{name_mention}</b>!\nTo access this chat, please DM me to '
+                                 '<b>verify you are not a robot</b> by accepting the terms (rules).', reply_markup=markup)
             except Exception:
-                logger.exception("Failed to approve/restrict user %s in chat %s", user_id, chat_id)
+                logger.exception('Failed to approve/restrict user %s in chat %s', user_id, chat_id)
         else:
-            logger.exception("Telegram API error for join request user %s", user_id)
+            logger.exception('Telegram API error for join request user %s', user_id)
     except Exception:
-        logger.exception("Unexpected error handling join request for user %s", user_id)
+        logger.exception('Unexpected error handling join request for user %s', user_id)
 
 
 @bot.message_handler(content_types=["new_chat_members"])
@@ -251,15 +253,15 @@ def handle_new_chat_members(message):
         user_id = member.id
         if user_id in SUPERUSERS or user_id == BOT_ID:
             continue
-        active_pending = db.get_active_pending_request(chat_id, user_id)
-        if not active_pending:
-            continue
+        latest_status = (db.get_latest_request(chat_id, user_id) or {}).get('status')
+        if latest_status in {'completed', 'restricted'}:
+            continue # Only users explicitly allowed by bot flow may remain in group
         try:
             bot.ban_chat_member(chat_id, user_id)
             bot.unban_chat_member(chat_id, user_id, only_if_banned=True)
-            logger.warning("Removed user %s from chat %s: manually approved while verification pending", user_id, chat_id)
+            logger.warning('Kicked unauthorized join user %s from chat %s (latest_status=%s)', user_id, chat_id, latest_status)
         except Exception:
-            logger.exception("Failed to remove manually approved pending user %s from chat %s", user_id, chat_id)
+            logger.exception('Failed to kick unauthorized join user %s from chat %s', user_id, chat_id)
 
 
 # ── Admin callback handlers ───────────────────────────────────────
@@ -525,12 +527,13 @@ def _unrestrict_user(chat_id: int, user_id: int):
                 can_add_web_page_previews=True,
                 can_send_polls=True,
                 can_invite_users=True,
-                can_pin_messages=False,
-                can_change_info=False,
+                can_edit_tag=True,
+                can_pin_messages=True,
+                can_change_info=True,
             ),
         )
     except Exception:
-        logger.warning("Could not unrestrict user %s in chat %s", user_id, chat_id)
+        logger.warning('Could not unrestrict user %s in chat %s', user_id, chat_id)
 
 
 def _handle_flag_result(
@@ -567,41 +570,37 @@ def _notify_admin(
     matched_user_id: int,
     score: float,
     components: list,
-    new_user_name: str = "",
-    matched_user_name: str = "",
+    new_user_name: str = '',
+    matched_user_name: str = '',
 ):
     """Send alert to log chat with inline action buttons."""
     if not LOG_CHAT_ID:
         return
-    action_word = (
-        "DECLINED" if AUTO_DECLINE_ON_MATCH
-        else "Approved (pending review)"
-    )
-    components_str = ", ".join(components)
-    new_label = f"{new_user_name} ({new_user_id})" if new_user_name else str(new_user_id)
-    matched_label = f"{matched_user_name} ({matched_user_id})" if matched_user_name else str(matched_user_id)
+    action_word = 'DECLINED' if AUTO_DECLINE_ON_MATCH else 'Approved <i>(pending review)</i>'
+    new_label = f'<a href="tg://openmessage?user_id={new_user_id}">{escape(new_user_name) if new_user_name else f"[id: {new_user_id}]"}</a>'
+    matched_label = f'<a href="tg://openmessage?user_id={matched_user_id}">{escape(matched_user_name) if matched_user_name else f"[id: {matched_user_id}]"}</a>'
     # Show total linked accounts if this is part of a larger cluster
     connected = db.get_all_connected_users(new_user_id)
-    cluster_info = ""
+    cluster_info = ''
     if len(connected) > 2:
         cluster_labels = []
         for uid in sorted(connected):
-            name = db.get_user_name(uid)
-            cluster_labels.append(f"{name} ({uid})" if name else str(uid))
+            name = escape(db.get_user_name(uid) or f'[id: {str(uid)}]')
+            cluster_labels.append(f'<a href="tg://openmessage?user_id={uid}">{name}</a>')
         cluster_info = (
-            f"\nCluster: {len(connected)} linked accounts total"
-            f"\nAll: {', '.join(cluster_labels)}"
+            f'\n<b>Cluster:</b> {len(connected)} linked accounts'
+            f'\n<blockquote expandable>{"  <b>▏</b>".join(cluster_labels)}</blockquote>'
         )
     alert_text = (
-        "\U000026a0\U0000fe0f MULTI-ACCOUNT DETECTED\n"
-        f"{'=' * 32}\n"
-        f"Status: {action_word}\n\n"
-        f"New user: {new_label}\n"
-        f"Matches: {matched_label}\n"
-        f"Similarity: {score:.0%}\n"
-        f"Signals: {components_str}\n"
-        f"Group: {chat_id}\n"
-        f"{cluster_info}"
+        '⚠️ <b>MULTI-ACCOUNT DETECTED</b> ⚠️\n'
+        f'{'       ' * 5}\n'
+        f'<b>Status:</b> {action_word}\n\n'
+        f'<b>New user:</b> {new_label}\n'
+        f'<b>Matches:</b> {matched_label}\n'
+        f'<b>Similarity:</b> <code>{score:.0%}</code>\n'
+        f'<b>Signals:</b> <i>{", ".join(components)}</i>\n'
+        f'<b>Group:</b> <code>{chat_id}</code>\n'
+        f'{cluster_info}'
     )
     markup = InlineKeyboardMarkup()
     markup.row(
