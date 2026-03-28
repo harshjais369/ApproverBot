@@ -357,7 +357,8 @@ def get_connection_details(user_id: int) -> List[dict]:
     placeholders = ",".join("?" for _ in connected)
     rows = conn.execute(
         f"SELECT * FROM flags WHERE new_user_id IN ({placeholders}) "
-        f"OR matched_user_id IN ({placeholders})",
+        f"OR matched_user_id IN ({placeholders}) "
+        f"ORDER BY datetime(created_at) DESC, id DESC",
         list(connected) + list(connected),
     ).fetchall()
     return [dict(r) for r in rows]
