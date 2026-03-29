@@ -59,14 +59,16 @@ def handle_start(message):
             db.update_pending_token(req['id'], token, expires_at)
             verify_url = f'{WEB_BASE_URL}/verify?token={token}'
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton(
-                text='\U0001f513 Verify to Access Chat',
-                web_app=WebAppInfo(url=verify_url),
-            ))
-            markup.add(InlineKeyboardButton(
-                text='🔙 Return to Group',
-                url=f'https://t.me/CrocodileGamesGroup',
-            ))
+            markup.row(
+                InlineKeyboardButton(
+                    text='\U0001f513 Verify to Access Chat',
+                    web_app=WebAppInfo(url=verify_url),
+                ),
+                InlineKeyboardButton(
+                    text='🔙 Return to Group',
+                    url=f'https://t.me/CrocodileGamesGroup',
+                ),
+            )
             bot.send_message(user_id, f'Hi <b>{first_name}</b>!\nYou\'ve joined <b>Crocodile Games</b> group but haven\'t verified yet. '
                              'Complete verification to get access <i>(send messages, stickers, etc.)</i> to the group.', reply_markup=markup)
         return
@@ -181,14 +183,16 @@ def handle_join_request(jr):
         # Try to DM the user with a verification link
         verify_url = f'{WEB_BASE_URL}/verify?token={token}'
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton(
-            text='\U0001f513 I\'m not a robot',
-            web_app=WebAppInfo(url=verify_url),
-        ))
-        markup.add(InlineKeyboardButton(
-            text='🔙 Return to Group',
-            url=f'https://t.me/CrocodileGamesGroup',
-        ))
+        markup.row(
+            InlineKeyboardButton(
+                text='\U0001f513 I\'m not a robot',
+                web_app=WebAppInfo(url=verify_url),
+            ),
+            InlineKeyboardButton(
+                text='🔙 Return to Group',
+                url=f'https://t.me/CrocodileGamesGroup',
+            ),
+        )
         bot.send_message(user_id, f'Hi <b>{escape(full_name)}</b>!\nTo join the group <i>(@CrocodileGamesGroup)</i>, '
                          'please <b>verify you are not a robot</b> by accepting the terms (rules).', reply_markup=markup)
         # DM succeeded — store as normal pending request
