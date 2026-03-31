@@ -38,9 +38,11 @@
             width: 96px;
             height: 96px;
             border-radius: 50%;
-            object-fit: cover;
-            box-shadow: 0 8px 18px rgba(31, 134, 255, 0.22);
             border: 3px solid rgba(31, 134, 255, 0.18);
+            box-shadow: 0 8px 18px rgba(31, 134, 255, 0.22);
+            object-fit: cover;
+            user-select: none;
+            -webkit-user-drag: none;
         }
         .page-title {
             font-size: 18px;
@@ -135,7 +137,7 @@
     <div class="page">
         <div class="page-header">
             <div class="brand-logo-wrap">
-                <img class="brand-logo" src="{{ brand_logo }}" alt="Crocodile Games logo">
+                <img class="brand-logo" src="{{ brand_logo }}" alt="Crocodile Games logo" draggable="false" oncontextmenu="return false;" ondragstart="return false;">
             </div>
             <div class="page-title">Terms &amp; Conditions</div>
             <div class="page-subtitle">Crocodile Games 🐊🇮🇳 - Support Group</div>

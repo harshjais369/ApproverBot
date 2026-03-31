@@ -66,9 +66,11 @@
             width: 92px;
             height: 92px;
             border-radius: 50%;
-            object-fit: cover;
-            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
             border: 2px solid color-mix(in srgb, var(--tg-theme-link-color, #3390ec) 45%, transparent);
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+            object-fit: cover;
+            user-select: none;
+            -webkit-user-drag: none;
         }
         .page-title {
             font-size: 18px;
@@ -201,7 +203,7 @@
     <div id="ready" class="hidden">
         <div class="page-header">
             <div class="brand-logo-wrap">
-                <img class="brand-logo" src="{{ brand_logo }}" alt="Crocodile Games logo">
+                <img class="brand-logo" src="{{ brand_logo }}" alt="Crocodile Games logo" draggable="false" oncontextmenu="return false;" ondragstart="return false;">
             </div>
             <div class="page-title">Terms &amp; Conditions</div>
             <div class="page-subtitle">Crocodile Games 🐊🇮🇳 — Support Group</div>
