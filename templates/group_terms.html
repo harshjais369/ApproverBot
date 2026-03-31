@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Terms &amp; Conditions - Crocodile Games</title>
+    {% set brand_logo = url_for('static', filename='branding/crocodile-game-logo.jpg') %}
+    <link rel="icon" type="image/jpeg" sizes="32x32" href="{{ brand_logo }}">
+    <link rel="apple-touch-icon" href="{{ brand_logo }}">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { height: 100%; }
@@ -27,6 +30,17 @@
             padding-bottom: 16px;
             border-bottom: 1px solid #e0e0e0;
             flex-shrink: 0;
+        }
+        .brand-logo-wrap {
+            margin-bottom: 10px;
+        }
+        .brand-logo {
+            width: 96px;
+            height: 96px;
+            border-radius: 50%;
+            object-fit: cover;
+            box-shadow: 0 8px 18px rgba(31, 134, 255, 0.22);
+            border: 3px solid rgba(31, 134, 255, 0.18);
         }
         .page-title {
             font-size: 18px;
@@ -110,12 +124,19 @@
             .page {
                 padding: 16px 14px 0;
             }
+            .brand-logo {
+                width: 82px;
+                height: 82px;
+            }
         }
     </style>
 </head>
 <body>
     <div class="page">
         <div class="page-header">
+            <div class="brand-logo-wrap">
+                <img class="brand-logo" src="{{ brand_logo }}" alt="Crocodile Games logo">
+            </div>
             <div class="page-title">Terms &amp; Conditions</div>
             <div class="page-subtitle">Crocodile Games 🐊🇮🇳 - Support Group</div>
         </div>
@@ -124,62 +145,80 @@
         </p>
         <ol class="terms-list">
             <li>
-                Do not DM any member/admin without their prior and explicit consent.
+                Do not send DMs to any member/admin without that person's prior explicit consent.
                 <ol class="sub-clauses">
-                    <li>If you receive unsolicited DMs from someone in this group, report it to an admin immediately.</li>
+                    <li>If you receive an unsolicited DM from someone in this group, report it to an admin immediately.</li>
                 </ol>
             </li>
             <li>
-                Disturbing, harassing, or provoking any member, whether in the group or in private DMs, is strictly prohibited.
+                Any conduct that disturbs, harasses, or provokes a member, whether in the group or in private DMs, is strictly prohibited.
             </li>
             <li>
-                Unsolicited or repeated mentions/tags to admins or unknown random members in the group are not allowed.
+                Unsolicited or repeated mentions/tags of admins or unrelated members in the group are not allowed.
                 <ol class="sub-clauses">
                     <li>Only tag members when necessary and relevant to the discussion.</li>
                     <li>Do not tag admins for non-urgent/irrelevant matters or to seek attention.</li>
                 </ol>
             </li>
             <li>
-                All promotions or advertisements, whether in the group or via DMs to its members, require prior admin approval.
+                Any promotions or advertisements, whether in the group or via DMs to its members, require prior admin approval.
                 <ol class="sub-clauses">
-                    <li>Links or ads in your profile are allowed, as long as they do not contain NSFW, harmful, or objectionable content.</li>
-                    <li>Suspicious accounts or bots with ads/links in their profile, or those sending unsolicited greetings, will be banned.</li>
+                    <li>Links or ads in your profile are allowed only if they do not contain NSFW, harmful, or objectionable content.</li>
+                    <li>Suspicious accounts or bots with ads/links in their profile, or those sending unsolicited greetings, may be banned.</li>
                 </ol>
             </li>
             <li>
                 Using or testing bots, automated scripts, or userbots of any kind is prohibited.
             </li>
             <li>
-                Using multiple accounts to bypass restrictions/bans, harass members, or for any malicious purpose will result in a permanent ban of all associated accounts.
+                Using multiple accounts to bypass restrictions/bans, harass members, or engage in any malicious activity may result in a permanent ban of all associated accounts.
             </li>
             <li>
-                Do not mass-delete your own messages from the group chat.
+                Mass deletion of your own messages from the group chat is prohibited.
             </li>
             <li>
-                Sending any inappropriate, disturbing, hateful, provoking, sexual, or otherwise objectionable texts or contents is prohibited.
+                Sending any inappropriate, disturbing, hateful, provoking, sexual, or otherwise objectionable text or content is prohibited.
                 <ol class="sub-clauses">
                     <li>This includes indirect use of words, emojis, or context in an inappropriate manner.</li>
-                    <li>Anything that may be considered inappropriate in a public support group, and not listed herein, should not be considered to be permitted.</li>
+                    <li>Anything that may reasonably be considered inappropriate in a public support group and is not listed herein should not be considered permitted.</li>
                 </ol>
             </li>
             <li>
-                Sharing any content that violates applicable laws or Telegram's Terms of Service is prohibited.
+                Sharing any content that violates applicable law or Telegram's Terms of Service is prohibited.
             </li>
             <li>
-                These terms are inclusive of and inherit <a href="https://telegram.org/tos" target="_blank" rel="noopener noreferrer">Telegram's Terms of Service</a>.
+                These terms are inclusive of and inherit from <a href="https://telegram.org/tos" target="_blank" rel="noopener noreferrer">Telegram's Terms of Service</a>.
                 <ol class="sub-clauses">
-                    <li>You are solely responsible for complying with any additional applicable laws in your jurisdiction.</li>
+                    <li>You are solely responsible for complying with any additional applicable law in your jurisdiction.</li>
                 </ol>
             </li>
             <li>
                 Violation of any clause may result in a permanent ban, as deemed appropriate by the admins.
                 <ol class="sub-clauses">
                     <li>Ignorance of these terms will not be accepted as an excuse for non-compliance.</li>
-                    <li>The group admins' decision is final and supersedes these terms.</li>
+                    <li>In case of ambiguity, the admins' interpretation and enforcement of these terms shall be final, subject to applicable law and Telegram's ToS.</li>
                 </ol>
             </li>
             <li>
-                Crocodile Games reserve the right to update these terms later without prior notice. You are required to review this page periodically to stay informed of any updates.
+                Crocodile Games reserves the right to update these terms without prior notice. You are required to review this page periodically to stay informed of updates.
+            </li>
+            <li>
+                The group, its content, and moderation actions are provided on an "as is" and "as available" basis, without any representation or warranty, express or implied, to the maximum extent permitted by applicable law.
+            </li>
+            <li>
+                To the maximum extent permitted under applicable law, Crocodile Games and the group admins shall not be liable for any direct, indirect, incidental, consequential, special, punitive, or exemplary loss or damage arising out of or in connection with your use of the group.
+            </li>
+            <li>
+                Any interaction, transaction, arrangement, or dispute with any third party (including links, promotions, or contacts discovered through the group) is solely between you and such third party.
+            </li>
+            <li>
+                You agree to indemnify and hold harmless Crocodile Games and the group admins from and against claims, liabilities, losses, costs, or expenses arising from your breach of these terms, your conduct, or your violation of applicable law.
+            </li>
+            <li>
+                For moderation, safety, or legal compliance purposes, admins may preserve relevant logs, messages, reports, and other records, and may cooperate with lawful requests from competent authorities.
+            </li>
+            <li>
+                If any provision of these terms is held invalid, illegal, or unenforceable, the remaining provisions shall continue in full force and effect.
             </li>
         </ol>
         <div class="terms-footer">
