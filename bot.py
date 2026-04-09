@@ -242,26 +242,32 @@ def handle_join_request(jr):
     except Exception:
         logger.exception('Unexpected error handling join request for user %s', user_id)
 
-
-@bot.message_handler(content_types=["new_chat_members"])
-def handle_new_chat_members(message):
-    """Kick users manually approved while their join request is still pending."""
-    chat_id = message.chat.id
+@bot.chat_member_handler()
+def handle_chat_member_update(update):
+    """Kick users who entered chat without being allowed by the bot flow."""
+    chat_id = update.chat.id
+    user_id = update.new_chat_member.user.id
     if ALLOWED_GROUPS and chat_id not in ALLOWED_GROUPS:
         return
-    for member in message.new_chat_members or []:
-        user_id = member.id
-        if user_id in SUPERUSERS or user_id == BOT_ID:
-            continue
-        latest_status = (db.get_latest_request(chat_id, user_id) or {}).get('status')
-        if latest_status in {'completed', 'restricted'}:
-            continue # Only users explicitly allowed by bot flow may remain in group
-        try:
-            bot.ban_chat_member(chat_id, user_id)
-            bot.unban_chat_member(chat_id, user_id, only_if_banned=True)
-            logger.warning('Kicked unauthorized join user %s from chat %s (latest_status=%s)', user_id, chat_id, latest_status)
-        except Exception:
-            logger.exception('Failed to kick unauthorized join user %s from chat %s', user_id, chat_id)
+    if user_id in SUPERUSERS or user_id == BOT_ID:
+        return
+    old_status = update.old_chat_member.status
+    new_status = update.new_chat_member.status
+    if old_status in {'member', 'administrator', 'creator'} \
+        or (old_status == 'restricted' and bool(getattr(update.old_chat_member, 'is_member', False))):
+        return
+    if not (new_status in {'member', 'administrator', 'creator'} \
+        or (new_status == 'restricted' and bool(getattr(update.new_chat_member, 'is_member', False)))):
+        return
+    latest_status = (db.get_latest_request(chat_id, user_id) or {}).get('status')
+    if latest_status == 'completed' or latest_status == 'restricted':
+        return
+    try:
+        bot.ban_chat_member(chat_id, user_id)
+        bot.unban_chat_member(chat_id, user_id, only_if_banned=True)
+        logger.warning('Kicked unauthorized join user %s from chat %s (status_now=%s)', user_id, chat_id, latest_status)
+    except Exception:
+        logger.exception('Failed to kick unauthorized join user %s from chat %s (status_now=%s)', user_id, chat_id, latest_status)
 
 
 # ── Admin callback handlers ───────────────────────────────────────
@@ -662,6 +668,6 @@ if __name__ == "__main__":
             "message",
             "callback_query",
             "chat_join_request",
-            "new_chat_members",
+            "chat_member",
         ],
     )
