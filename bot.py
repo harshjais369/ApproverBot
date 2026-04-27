@@ -351,6 +351,10 @@ def serve_root():
     """Redirect the website root to the Telegram bot deep link."""
     return redirect("https://t.me/CrocodileGameEnn_bot", code=302)
 
+@app.route('/support', methods=['GET'])
+def serve_support():
+    """Redirect to bot support group."""
+    return redirect('https://t.me/CrocodileGamesGroup', code=302)
 
 @app.route("/terms", methods=["GET"])
 @app.route("/tnc", methods=["GET"])
