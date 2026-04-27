@@ -25,6 +25,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./static/CrocBot_Usage_Guide.md:/usr/share/nginx/html/CrocBot_Usage_Guide.md:ro
+      - ./static/robots.txt:/usr/share/nginx/html/robots.txt:ro
       - certbot_www:/var/www/certbot:ro
       - certbot_conf:/etc/letsencrypt:ro
     networks:
