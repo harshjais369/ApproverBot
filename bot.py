@@ -3,7 +3,7 @@ import uuid
 import threading
 import logging
 from time import sleep
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import telebot
 from telebot.types import (
@@ -13,6 +13,7 @@ from telebot.types import (
     ChatPermissions,
 )
 from telebot.util import escape
+import patch_telebot  # Bot API 10.1 join request queries
 from flask import Flask, request, render_template, jsonify, redirect
 
 from config import *
@@ -55,7 +56,7 @@ def handle_start(message):
     if restricted:
         for req in restricted:
             token = uuid.uuid4().hex
-            expires_at = (datetime.utcnow() + timedelta(minutes=PENDING_REQUEST_TTL_MINUTES)).isoformat()
+            expires_at = (datetime.now(timezone.utc) + timedelta(minutes=PENDING_REQUEST_TTL_MINUTES)).isoformat()
             db.update_pending_token(req['id'], token, expires_at)
             verify_url = f'{WEB_BASE_URL}/verify?token={token}'
             markup = InlineKeyboardMarkup()
@@ -157,6 +158,9 @@ def handle_join_request(jr):
     """
     Triggered when a user requests to join a group where the bot is admin
     with 'Approve new members' permission.
+
+    Bot API 10.1: If the request carries a `query_id`, the bot can open
+    a Mini App directly via sendChatJoinRequestWebApp — no DM needed.
     """
     chat_id = jr.chat.id
     user_id = jr.from_user.id
@@ -165,20 +169,45 @@ def handle_join_request(jr):
         logger.debug('Ignoring join request from non-allowed group %s', chat_id)
         return
     if user_id in SUPERUSERS:
-        # Auto-approve superusers without DM
+        # Auto-approve superusers
         try:
-            bot.approve_chat_join_request(chat_id, user_id)
+            query_id = getattr(jr, 'query_id', None)
+            if query_id:
+                bot.answer_chat_join_request_query(query_id, 'approve')
+            else:
+                bot.approve_chat_join_request(chat_id, user_id)
             logger.info('Auto-approved superuser %s for chat %s', user_id, chat_id)
         except Exception:
             logger.exception('Failed to approve superuser %s', user_id)
         return
     token = uuid.uuid4().hex
     expires_at = (
-        datetime.utcnow()
+        datetime.now(timezone.utc)
         + timedelta(minutes=PENDING_REQUEST_TTL_MINUTES)
     ).isoformat()
+
+    # ── Bot API 10.1: open Mini App directly via join request query ──
+    query_id = getattr(jr, 'query_id', None)
+    if query_id:
+        try:
+            verify_url = f'{WEB_BASE_URL}/verify?token={token}'
+            bot.send_chat_join_request_web_app(query_id, verify_url)
+            db.create_pending_request(
+                chat_id=chat_id,
+                user_id=user_id,
+                user_name=full_name,
+                token=token,
+                expires_at=expires_at,
+                status='pending',
+            )
+            logger.info(f'Opened Mini App via query_id for user {user_id} in chat {chat_id}')
+            return
+        except Exception:
+            logger.exception(f'sendChatJoinRequestWebApp failed for user {user_id}, falling back to DM flow')
+            # Fall through to legacy DM flow below
+
+    # ── Legacy flow: DM the user with a verification button ──
     try:
-        # Try to DM the user with a verification link
         verify_url = f'{WEB_BASE_URL}/verify?token={token}'
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(
