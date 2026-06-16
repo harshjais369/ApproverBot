@@ -7,7 +7,74 @@
     {% set brand_logo = url_for('static', filename='branding/crocodile-game-logo.jpg') %}
     <link rel="icon" type="image/jpeg" sizes="32x32" href="{{ brand_logo }}">
     <link rel="apple-touch-icon" href="{{ brand_logo }}">
-    <script src="https://telegram.org/js/telegram-web-app.js?61"></script>
+    <script>
+        window.__telegramWebAppReady = (function () {
+            var resolveReady;
+            var resolved = false;
+            var timeoutId = null;
+            var fallbackLoaded = false;
+
+            function loadScript(src, onLoad, onError) {
+                var script = document.createElement("script");
+                script.src = src;
+                script.async = false;
+                script.onload = function () {
+                    onLoad();
+                };
+                script.onerror = function () {
+                    onError(new Error("Failed to load " + src));
+                };
+                document.head.appendChild(script);
+            }
+
+            function finish() {
+                if (resolved) {
+                    return;
+                }
+                resolved = true;
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                }
+                resolveReady();
+            }
+
+            function showFallbackToast() {
+                if (window.__showTelegramToast) {
+                    window.__showTelegramToast("One moment while the page finishes loading.");
+                }
+            }
+
+            function loadFallback() {
+                if (resolved) {
+                    return;
+                }
+                if (fallbackLoaded) {
+                    return;
+                }
+                fallbackLoaded = true;
+                loadScript("{{ url_for('static', filename='telegram-web-app-shim.js') }}", function () {
+                    showFallbackToast();
+                    finish();
+                }, function () {
+                    showFallbackToast();
+                    finish();
+                });
+            }
+
+            timeoutId = setTimeout(loadFallback, 3500);
+            loadScript("https://telegram.org/js/telegram-web-app.js?62", function () {
+                if (window.Telegram && window.Telegram.WebApp) {
+                    finish();
+                } else {
+                    loadFallback();
+                }
+            }, loadFallback);
+
+            return new Promise(function (resolve) {
+                resolveReady = resolve;
+            });
+        })();
+    </script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
@@ -182,6 +249,42 @@
             max-width: 300px;
         }
 
+        .toast {
+            position: fixed;
+            left: 50%;
+            bottom: 20px;
+            transform: translateX(-50%) translateY(12px);
+            max-width: min(92vw, 420px);
+            padding: 12px 16px;
+            border-radius: 999px;
+            background: rgba(17, 24, 39, 0.92);
+            color: #ffffff;
+            font-size: 13px;
+            line-height: 1.35;
+            box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 180ms ease, transform 180ms ease;
+            z-index: 1000;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .toast.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .telegram-fallback {
+            margin: 0 0 16px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            background: color-mix(in srgb, var(--tg-theme-button-color, #3390ec) 10%, transparent);
+            color: var(--tg-theme-text-color, #000000);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
         .hidden { display: none !important; }
 
         @media (max-width: 520px) {
@@ -212,6 +315,8 @@
         <p class="terms-intro">
             By joining <b>@CrocodileGamesGroup</b>, you agree to the following terms:
         </p>
+
+        <div id="telegram-fallback" class="telegram-fallback hidden"></div>
 
         <ol class="terms-list">
             <li>
@@ -304,289 +409,313 @@
         <p class="result-text" id="result-text"></p>
     </div>
 
+    <div id="toast" class="toast" aria-live="polite"></div>
+
     <script>
         const TOKEN = "{{ token }}";
         const API_URL = "{{ api_url }}";
-        const tg = window.Telegram.WebApp;
+        window.__telegramWebAppReady.then(function () {
+            const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+            const isTelegramWebApp = Boolean(tg && tg.initData);
+            const toastEl = document.getElementById("toast");
+            let toastTimer = null;
 
-        tg.ready();
-        tg.expand();
-        try { tg.disableVerticalSwipes(); } catch (e) { console.warn("[init] disableVerticalSwipes unsupported:", e); }
-
-        // ═══════════════════════════════════════════════════════════
-        //  FINGERPRINT COLLECTION
-        // ═══════════════════════════════════════════════════════════
-
-        async function sha256(str) {
-            const buf = await crypto.subtle.digest(
-                "SHA-256",
-                new TextEncoder().encode(str)
-            );
-            return Array.from(new Uint8Array(buf))
-                .map(b => b.toString(16).padStart(2, "0"))
-                .join("");
-        }
-
-        // ── localStorage persistent device ID ────────────────────
-        function getOrCreateDeviceId() {
-            const KEY = "__ab_dvid";
-            try {
-                let id = localStorage.getItem(KEY);
-                if (!id) {
-                    id = crypto.randomUUID
-                        ? crypto.randomUUID()
-                        : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
-                              /[xy]/g,
-                              c => {
-                                  const r = (Math.random() * 16) | 0;
-                                  return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
-                              }
-                          );
-                    localStorage.setItem(KEY, id);
+            window.__showTelegramToast = function (message) {
+                if (!toastEl) {
+                    return;
                 }
-                return id;
-            } catch {
-                return "";
-            }
-        }
-
-        // ── Canvas fingerprint ───────────────────────────────────
-        async function getCanvasHash() {
-            try {
-                const canvas = document.createElement("canvas");
-                canvas.width = 280;
-                canvas.height = 60;
-                const ctx = canvas.getContext("2d");
-                if (!ctx) return "";
-
-                // Text with specific font stack
-                ctx.textBaseline = "alphabetic";
-                ctx.font = "14px 'Arial'";
-                ctx.fillStyle = "#f60";
-                ctx.fillRect(125, 1, 62, 20);
-                ctx.fillStyle = "#069";
-                ctx.fillText("Cwm fjordbank glyphs vext quiz, \ud83d\ude03", 2, 15);
-                ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
-                ctx.font = "18px 'Times New Roman'";
-                ctx.fillText("Cwm fjordbank glyphs vext quiz, \ud83d\ude03", 4, 45);
-
-                // Geometric shapes
-                ctx.globalCompositeOperation = "multiply";
-                ctx.fillStyle = "rgb(255,0,255)";
-                ctx.beginPath();
-                ctx.arc(50, 50, 50, 0, Math.PI * 2, true);
-                ctx.closePath();
-                ctx.fill();
-                ctx.fillStyle = "rgb(0,255,255)";
-                ctx.beginPath();
-                ctx.arc(100, 50, 50, 0, Math.PI * 2, true);
-                ctx.closePath();
-                ctx.fill();
-                ctx.fillStyle = "rgb(255,255,0)";
-                ctx.beginPath();
-                ctx.arc(75, 100, 50, 0, Math.PI * 2, true);
-                ctx.closePath();
-                ctx.fill();
-
-                return await sha256(canvas.toDataURL());
-            } catch {
-                return "";
-            }
-        }
-
-        // ── WebGL fingerprint ────────────────────────────────────
-        async function getWebGLHash() {
-            try {
-                const canvas = document.createElement("canvas");
-                const gl =
-                    canvas.getContext("webgl") ||
-                    canvas.getContext("experimental-webgl");
-                if (!gl) return "";
-
-                const dbgInfo = gl.getExtension("WEBGL_debug_renderer_info");
-                const renderer = dbgInfo
-                    ? gl.getParameter(dbgInfo.UNMASKED_RENDERER_WEBGL)
-                    : "";
-                const vendor = dbgInfo
-                    ? gl.getParameter(dbgInfo.UNMASKED_VENDOR_WEBGL)
-                    : "";
-
-                const data = [
-                    renderer,
-                    vendor,
-                    gl.getParameter(gl.VERSION),
-                    gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
-                    gl.getParameter(gl.MAX_TEXTURE_SIZE),
-                    gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
-                    gl.getParameter(gl.MAX_VIEWPORT_DIMS)?.toString(),
-                    gl.getParameter(gl.MAX_VERTEX_ATTRIBS),
-                    gl.getParameter(gl.MAX_VERTEX_UNIFORM_VECTORS),
-                    gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS),
-                    gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE)?.toString(),
-                    gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)?.toString(),
-                    gl.getSupportedExtensions()?.join(","),
-                ].join("|");
-
-                return await sha256(data);
-            } catch {
-                return "";
-            }
-        }
-
-        // ── Audio fingerprint ────────────────────────────────────
-        async function getAudioHash() {
-            try {
-                const AudioCtx =
-                    window.OfflineAudioContext || window.webkitOfflineAudioContext;
-                if (!AudioCtx) return "";
-
-                const ctx = new AudioCtx(1, 44100, 44100);
-                const oscillator = ctx.createOscillator();
-                oscillator.type = "triangle";
-                oscillator.frequency.setValueAtTime(10000, ctx.currentTime);
-
-                const compressor = ctx.createDynamicsCompressor();
-                compressor.threshold.setValueAtTime(-50, ctx.currentTime);
-                compressor.knee.setValueAtTime(40, ctx.currentTime);
-                compressor.ratio.setValueAtTime(12, ctx.currentTime);
-                compressor.attack.setValueAtTime(0, ctx.currentTime);
-                compressor.release.setValueAtTime(0.25, ctx.currentTime);
-
-                oscillator.connect(compressor);
-                compressor.connect(ctx.destination);
-                oscillator.start(0);
-
-                const buffer = await ctx.startRendering();
-                const samples = buffer.getChannelData(0).slice(4500, 5000);
-                let sum = 0;
-                for (let i = 0; i < samples.length; i++) {
-                    sum += Math.abs(samples[i]);
+                toastEl.textContent = message;
+                toastEl.classList.add("visible");
+                if (toastTimer) {
+                    clearTimeout(toastTimer);
                 }
-                return await sha256(sum.toString());
-            } catch {
-                return "";
-            }
-        }
-
-        // ── Font detection ───────────────────────────────────────
-        async function getFontsHash() {
-            try {
-                const baseFonts = ["monospace", "sans-serif", "serif"];
-                const testFonts = [
-                    "Arial", "Arial Black", "Calibri", "Cambria", "Comic Sans MS",
-                    "Consolas", "Courier New", "Georgia", "Helvetica", "Impact",
-                    "Lucida Console", "Lucida Sans", "Microsoft Sans Serif",
-                    "Palatino Linotype", "Segoe UI", "Tahoma", "Times New Roman",
-                    "Trebuchet MS", "Verdana", "Roboto", "Noto Sans",
-                    "Ubuntu", "Cantarell", "Droid Sans", "Fira Sans",
-                    "Open Sans", "Lato", "Source Sans Pro",
-                ];
-
-                const testString = "mmmmmmmmmmlli";
-                const testSize = "72px";
-                const canvas = document.createElement("canvas");
-                const ctx = canvas.getContext("2d");
-                if (!ctx) return "";
-
-                // Measure base widths
-                const baseWidths = {};
-                for (const base of baseFonts) {
-                    ctx.font = `${testSize} ${base}`;
-                    baseWidths[base] = ctx.measureText(testString).width;
-                }
-
-                const detected = [];
-                for (const font of testFonts) {
-                    let found = false;
-                    for (const base of baseFonts) {
-                        ctx.font = `${testSize} '${font}', ${base}`;
-                        const width = ctx.measureText(testString).width;
-                        if (width !== baseWidths[base]) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found) detected.push(font);
-                }
-
-                return await sha256(detected.sort().join(","));
-            } catch {
-                return "";
-            }
-        }
-
-        // ── Screen resolution ────────────────────────────────────
-        function getScreenResolution() {
-            return `${screen.width}x${screen.height}x${screen.colorDepth}x${screen.pixelDepth}`;
-        }
-
-        // ── Timeout helper (fallback to "" if a probe hangs) ────
-        function withTimeout(promise, ms = 4000) {
-            return Promise.race([
-                promise,
-                new Promise(resolve => setTimeout(() => resolve(""), ms)),
-            ]);
-        }
-
-        // ── Collect all ──────────────────────────────────────────
-        async function collectFingerprint() {
-            const [canvasHash, webglHash, audioHash, fontsHash] =
-                await Promise.all([
-                    withTimeout(getCanvasHash()),
-                    withTimeout(getWebGLHash()),
-                    withTimeout(getAudioHash()),
-                    withTimeout(getFontsHash()),
-                ]);
-
-            return {
-                deviceId: getOrCreateDeviceId(),
-                canvasHash,
-                webglHash,
-                audioHash,
-                screenResolution: getScreenResolution(),
-                platform:
-                    (navigator.platform || "") + "|" + (tg.platform || ""),
-                languages: navigator.languages
-                    ? Array.from(navigator.languages)
-                    : [navigator.language || ""],
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
-                timezoneOffset: new Date().getTimezoneOffset(),
-                touchPoints: navigator.maxTouchPoints || 0,
-                deviceMemory: navigator.deviceMemory || null,
-                hardwareConcurrency: navigator.hardwareConcurrency || null,
-                fontsHash,
+                toastTimer = setTimeout(function () {
+                    toastEl.classList.remove("visible");
+                }, 2600);
             };
-        }
 
-        // ═══════════════════════════════════════════════════════════
-        //  MAIN FLOW
-        // ═══════════════════════════════════════════════════════════
+            if (isTelegramWebApp) {
+                tg.ready();
+                tg.expand();
+                try { tg.disableVerticalSwipes(); } catch (e) { console.warn("[init] disableVerticalSwipes unsupported:", e); }
+            }
 
-        function showState(id) {
-            document.getElementById("loading").classList.add("hidden");
-            document.getElementById("ready").classList.add("hidden");
-            document.getElementById("result").classList.add("hidden");
-            document.getElementById(id).classList.remove("hidden");
-        }
+            // ═══════════════════════════════════════════════════════════
+            //  FINGERPRINT COLLECTION
+            // ═══════════════════════════════════════════════════════════
 
-        function showResult(icon, title, text) {
-            document.getElementById("result-icon").textContent = icon;
-            document.getElementById("result-title").textContent = title;
-            document.getElementById("result-text").textContent = text;
-            showState("result");
-        }
+            async function sha256(str) {
+                const buf = await crypto.subtle.digest(
+                    "SHA-256",
+                    new TextEncoder().encode(str)
+                );
+                return Array.from(new Uint8Array(buf))
+                    .map(b => b.toString(16).padStart(2, "0"))
+                    .join("");
+            }
 
-        collectFingerprint()
-            .then(fp => {
+            // ── localStorage persistent device ID ────────────────────
+            function getOrCreateDeviceId() {
+                const KEY = "__ab_dvid";
+                try {
+                    let id = localStorage.getItem(KEY);
+                    if (!id) {
+                        id = crypto.randomUUID
+                            ? crypto.randomUUID()
+                            : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+                                /[xy]/g,
+                                c => {
+                                    const r = (Math.random() * 16) | 0;
+                                    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+                                }
+                            );
+                        localStorage.setItem(KEY, id);
+                    }
+                    return id;
+                } catch {
+                    return "";
+                }
+            }
+
+            // ── Canvas fingerprint ───────────────────────────────────
+            async function getCanvasHash() {
+                try {
+                    const canvas = document.createElement("canvas");
+                    canvas.width = 280;
+                    canvas.height = 60;
+                    const ctx = canvas.getContext("2d");
+                    if (!ctx) return "";
+
+                    // Text with specific font stack
+                    ctx.textBaseline = "alphabetic";
+                    ctx.font = "14px 'Arial'";
+                    ctx.fillStyle = "#f60";
+                    ctx.fillRect(125, 1, 62, 20);
+                    ctx.fillStyle = "#069";
+                    ctx.fillText("Cwm fjordbank glyphs vext quiz, \ud83d\ude03", 2, 15);
+                    ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
+                    ctx.font = "18px 'Times New Roman'";
+                    ctx.fillText("Cwm fjordbank glyphs vext quiz, \ud83d\ude03", 4, 45);
+
+                    // Geometric shapes
+                    ctx.globalCompositeOperation = "multiply";
+                    ctx.fillStyle = "rgb(255,0,255)";
+                    ctx.beginPath();
+                    ctx.arc(50, 50, 50, 0, Math.PI * 2, true);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.fillStyle = "rgb(0,255,255)";
+                    ctx.beginPath();
+                    ctx.arc(100, 50, 50, 0, Math.PI * 2, true);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.fillStyle = "rgb(255,255,0)";
+                    ctx.beginPath();
+                    ctx.arc(75, 100, 50, 0, Math.PI * 2, true);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    return await sha256(canvas.toDataURL());
+                } catch {
+                    return "";
+                }
+            }
+
+            // ── WebGL fingerprint ────────────────────────────────────
+            async function getWebGLHash() {
+                try {
+                    const canvas = document.createElement("canvas");
+                    const gl =
+                        canvas.getContext("webgl") ||
+                        canvas.getContext("experimental-webgl");
+                    if (!gl) return "";
+
+                    const dbgInfo = gl.getExtension("WEBGL_debug_renderer_info");
+                    const renderer = dbgInfo
+                        ? gl.getParameter(dbgInfo.UNMASKED_RENDERER_WEBGL)
+                        : "";
+                    const vendor = dbgInfo
+                        ? gl.getParameter(dbgInfo.UNMASKED_VENDOR_WEBGL)
+                        : "";
+
+                    const data = [
+                        renderer,
+                        vendor,
+                        gl.getParameter(gl.VERSION),
+                        gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+                        gl.getParameter(gl.MAX_TEXTURE_SIZE),
+                        gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+                        gl.getParameter(gl.MAX_VIEWPORT_DIMS)?.toString(),
+                        gl.getParameter(gl.MAX_VERTEX_ATTRIBS),
+                        gl.getParameter(gl.MAX_VERTEX_UNIFORM_VECTORS),
+                        gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS),
+                        gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE)?.toString(),
+                        gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)?.toString(),
+                        gl.getSupportedExtensions()?.join(","),
+                    ].join("|");
+
+                    return await sha256(data);
+                } catch {
+                    return "";
+                }
+            }
+
+            // ── Audio fingerprint ────────────────────────────────────
+            async function getAudioHash() {
+                try {
+                    const AudioCtx =
+                        window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                    if (!AudioCtx) return "";
+
+                    const ctx = new AudioCtx(1, 44100, 44100);
+                    const oscillator = ctx.createOscillator();
+                    oscillator.type = "triangle";
+                    oscillator.frequency.setValueAtTime(10000, ctx.currentTime);
+
+                    const compressor = ctx.createDynamicsCompressor();
+                    compressor.threshold.setValueAtTime(-50, ctx.currentTime);
+                    compressor.knee.setValueAtTime(40, ctx.currentTime);
+                    compressor.ratio.setValueAtTime(12, ctx.currentTime);
+                    compressor.attack.setValueAtTime(0, ctx.currentTime);
+                    compressor.release.setValueAtTime(0.25, ctx.currentTime);
+
+                    oscillator.connect(compressor);
+                    compressor.connect(ctx.destination);
+                    oscillator.start(0);
+
+                    const buffer = await ctx.startRendering();
+                    const samples = buffer.getChannelData(0).slice(4500, 5000);
+                    let sum = 0;
+                    for (let i = 0; i < samples.length; i++) {
+                        sum += Math.abs(samples[i]);
+                    }
+                    return await sha256(sum.toString());
+                } catch {
+                    return "";
+                }
+            }
+
+            // ── Font detection ───────────────────────────────────────
+            async function getFontsHash() {
+                try {
+                    const baseFonts = ["monospace", "sans-serif", "serif"];
+                    const testFonts = [
+                        "Arial", "Arial Black", "Calibri", "Cambria", "Comic Sans MS",
+                        "Consolas", "Courier New", "Georgia", "Helvetica", "Impact",
+                        "Lucida Console", "Lucida Sans", "Microsoft Sans Serif",
+                        "Palatino Linotype", "Segoe UI", "Tahoma", "Times New Roman",
+                        "Trebuchet MS", "Verdana", "Roboto", "Noto Sans",
+                        "Ubuntu", "Cantarell", "Droid Sans", "Fira Sans",
+                        "Open Sans", "Lato", "Source Sans Pro",
+                    ];
+
+                    const testString = "mmmmmmmmmmlli";
+                    const testSize = "72px";
+                    const canvas = document.createElement("canvas");
+                    const ctx = canvas.getContext("2d");
+                    if (!ctx) return "";
+
+                    // Measure base widths
+                    const baseWidths = {};
+                    for (const base of baseFonts) {
+                        ctx.font = `${testSize} ${base}`;
+                        baseWidths[base] = ctx.measureText(testString).width;
+                    }
+
+                    const detected = [];
+                    for (const font of testFonts) {
+                        let found = false;
+                        for (const base of baseFonts) {
+                            ctx.font = `${testSize} '${font}', ${base}`;
+                            const width = ctx.measureText(testString).width;
+                            if (width !== baseWidths[base]) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found) detected.push(font);
+                    }
+
+                    return await sha256(detected.sort().join(","));
+                } catch {
+                    return "";
+                }
+            }
+
+            // ── Screen resolution ────────────────────────────────────
+            function getScreenResolution() {
+                return `${screen.width}x${screen.height}x${screen.colorDepth}x${screen.pixelDepth}`;
+            }
+
+            // ── Timeout helper (fallback to "" if a probe hangs) ────
+            function withTimeout(promise, ms = 4000) {
+                return Promise.race([
+                    promise,
+                    new Promise(resolve => setTimeout(() => resolve(""), ms)),
+                ]);
+            }
+
+            // ── Collect all ──────────────────────────────────────────
+            async function collectFingerprint() {
+                const [canvasHash, webglHash, audioHash, fontsHash] =
+                    await Promise.all([
+                        withTimeout(getCanvasHash()),
+                        withTimeout(getWebGLHash()),
+                        withTimeout(getAudioHash()),
+                        withTimeout(getFontsHash()),
+                    ]);
+
+                return {
+                    deviceId: getOrCreateDeviceId(),
+                    canvasHash,
+                    webglHash,
+                    audioHash,
+                    screenResolution: getScreenResolution(),
+                    platform:
+                        (navigator.platform || "") + "|" + (tg ? tg.platform : ""),
+                    languages: navigator.languages
+                        ? Array.from(navigator.languages)
+                        : [navigator.language || ""],
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+                    timezoneOffset: new Date().getTimezoneOffset(),
+                    touchPoints: navigator.maxTouchPoints || 0,
+                    deviceMemory: navigator.deviceMemory || null,
+                    hardwareConcurrency: navigator.hardwareConcurrency || null,
+                    fontsHash,
+                };
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            //  MAIN FLOW
+            // ═══════════════════════════════════════════════════════════
+
+            function showState(id) {
+                document.getElementById("loading").classList.add("hidden");
+                document.getElementById("ready").classList.add("hidden");
+                document.getElementById("result").classList.add("hidden");
+                document.getElementById(id).classList.remove("hidden");
+            }
+
+            function showResult(icon, title, text) {
+                document.getElementById("result-icon").textContent = icon;
+                document.getElementById("result-title").textContent = title;
+                document.getElementById("result-text").textContent = text;
+                showState("result");
+            }
+
+            collectFingerprint().then(fp => {
                 showState("ready");
-
+                if (!isTelegramWebApp) {
+                    const fallback = document.getElementById("telegram-fallback");
+                    fallback.textContent = "Open this page inside Telegram to complete verification. Telegram Web App features are unavailable in a regular browser.";
+                    fallback.classList.remove("hidden");
+                    return;
+                }
                 tg.MainButton.setText("Accept & Join");
                 tg.MainButton.show();
-
                 tg.MainButton.onClick(async () => {
                     tg.MainButton.showProgress(false);
                     tg.MainButton.disable();
-
                     try {
                         const resp = await fetch(API_URL + "/api/verify", {
                             method: "POST",
@@ -597,9 +726,7 @@
                                 fingerprint: fp,
                             }),
                         });
-
                         const result = await resp.json();
-
                         if (result.ok && result.status === "approved") {
                             showResult(
                                 "\u2705",
@@ -639,6 +766,7 @@
                     "This page is temporarily unavailable. Please try again later."
                 );
             });
+        });
     </script>
 </body>
 </html>
