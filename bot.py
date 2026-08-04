@@ -4,6 +4,7 @@ import threading
 import logging
 from time import sleep
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import telebot
 from telebot.types import (
@@ -341,18 +342,21 @@ def handle_ban_both(call):
     )
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("dismiss:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith(("dismiss:", "dismiss_req:")))
 def handle_dismiss(call):
+    """Dismiss button — simply removes all inline buttons from the alert message."""
     if not call.from_user.id in SUPERUSERS:
         bot.answer_callback_query(call.id, "Unauthorized.")
         return
-    parts = call.data.split(":")
-    new_uid, matched_uid = parts[1], parts[2]
-    bot.edit_message_text(
-        call.message.text + "\n\n--- DISMISSED by admin ---",
-        call.message.chat.id,
-        call.message.message_id,
-    )
+    try:
+        bot.edit_message_reply_markup(
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=None,
+        )
+        bot.answer_callback_query(call.id, "Dismissed")
+    except Exception as e:
+        bot.answer_callback_query(call.id, f"Error: {e}")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fp:"))
@@ -369,6 +373,26 @@ def handle_false_positive(call):
         call.message.chat.id,
         call.message.message_id,
     )
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("approve_req:"))
+def handle_approve_req(call):
+    """Admin approves a pending flagged user from the log chat."""
+    if not call.from_user.id in SUPERUSERS:
+        bot.answer_callback_query(call.id, "Unauthorized.")
+        return
+    parts = call.data.split(":")
+    chat_id, user_id, flag_id = int(parts[1]), int(parts[2]), int(parts[3])
+    try:
+        bot.approve_chat_join_request(chat_id, user_id)
+    except Exception:
+        pass  # May already be approved
+    _unrestrict_user(chat_id, user_id)
+    db.update_flag_action(flag_id, "approved")
+    db.mark_pending_completed_by_user(user_id, chat_id)
+    _update_log_message_status(call.message, "Approved ✅", chat_id, user_id)
+    bot.answer_callback_query(call.id, "User approved ✅")
+    logger.info("Admin approved flagged user %s in chat %s (flag %s)", user_id, chat_id, flag_id)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -408,13 +432,20 @@ def serve_verify_page():
 
 @app.route("/api/verify", methods=["POST"])
 def receive_fingerprint():
-    """Receive fingerprint data from the Mini Web App."""
+    """Receive fingerprint data from the Mini Web App.
+
+    Supports two actions:
+      - action="load" (default): Collect fingerprint on page open, check for matches.
+        If match found, send pending alert to admin log. Does NOT approve/decline.
+      - action="accept": User clicked "Accept & Join". Approve/decline based on flag status.
+    """
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"ok": False, "error": "Invalid JSON"}), 400
     init_data_raw = data.get("initData", "")
     fingerprint_data = data.get("fingerprint", {})
     token = data.get("token", "")
+    action = data.get("action", "load")  # "load" or "accept"
     # 1. Validate initData
     validated = validation.validate_init_data(init_data_raw)
     if validated is None:
@@ -446,100 +477,166 @@ def receive_fingerprint():
         user_full_name = f"{first} {last}".strip() if last else first
     except (json.JSONDecodeError, TypeError):
         pass
-    # 6. Build fingerprint record with server-side IP
-    client_ip, ip_info = request.headers.get("X-Forwarded-For", request.remote_addr), None
-    if client_ip:
-        client_ip = client_ip.split(",")[0].strip() if "," in client_ip else client_ip
-        ip_info = fp_module.fetch_ip_geolocation(client_ip) # Fetch IP geolocation data
-    fp_record = {
-        "user_id": user_id,
-        "full_name": user_full_name,
-        "device_id": fingerprint_data.get("deviceId", ""),
-        "canvas_hash": fingerprint_data.get("canvasHash", ""),
-        "webgl_hash": fingerprint_data.get("webglHash", ""),
-        "audio_hash": fingerprint_data.get("audioHash", ""),
-        "ip_address": client_ip,
-        "screen_resolution": fingerprint_data.get("screenResolution", ""),
-        "user_agent": request.headers.get("User-Agent", ""),
-        "platform": fingerprint_data.get("platform", ""),
-        "languages": json.dumps(fingerprint_data.get("languages", [])),
-        "timezone": fingerprint_data.get("timezone", ""),
-        "timezone_offset": fingerprint_data.get("timezoneOffset", 0),
-        "touch_points": fingerprint_data.get("touchPoints", 0),
-        "device_memory": fingerprint_data.get("deviceMemory"),
-        "hardware_concurrency": fingerprint_data.get("hardwareConcurrency"),
-        "fonts_hash": fingerprint_data.get("fontsHash", ""),
-        "raw_data": json.dumps(fingerprint_data),
-        "ip_info": json.dumps(ip_info) if ip_info else None,
-    }
 
-    # ── STEP 0: Check if user is already linked (permanent link) ──
-    # Once flagged, always flagged — regardless of current fingerprint.
-    existing_link = db.find_existing_link(user_id)
-    if existing_link:
-        # Determine the other user in this link
-        matched_user_id = (
-            existing_link["matched_user_id"]
-            if existing_link["new_user_id"] == user_id
-            else existing_link["new_user_id"]
-        )
+    # ═══════════════════════════════════════════════════════════════
+    #  ACTION: LOAD — fingerprint collection & matching on page open
+    # ═══════════════════════════════════════════════════════════════
+    if action == "load":
+        # 6. Build fingerprint record with server-side IP
+        client_ip, ip_info = request.headers.get("X-Forwarded-For", request.remote_addr), None
+        if client_ip:
+            client_ip = client_ip.split(",")[0].strip() if "," in client_ip else client_ip
+            ip_info = fp_module.fetch_ip_geolocation(client_ip) # Fetch IP geolocation data
+        fp_record = {
+            "user_id": user_id,
+            "full_name": user_full_name,
+            "device_id": fingerprint_data.get("deviceId", ""),
+            "canvas_hash": fingerprint_data.get("canvasHash", ""),
+            "webgl_hash": fingerprint_data.get("webglHash", ""),
+            "audio_hash": fingerprint_data.get("audioHash", ""),
+            "ip_address": client_ip,
+            "screen_resolution": fingerprint_data.get("screenResolution", ""),
+            "user_agent": request.headers.get("User-Agent", ""),
+            "platform": fingerprint_data.get("platform", ""),
+            "languages": json.dumps(fingerprint_data.get("languages", [])),
+            "timezone": fingerprint_data.get("timezone", ""),
+            "timezone_offset": fingerprint_data.get("timezoneOffset", 0),
+            "touch_points": fingerprint_data.get("touchPoints", 0),
+            "device_memory": fingerprint_data.get("deviceMemory"),
+            "hardware_concurrency": fingerprint_data.get("hardwareConcurrency"),
+            "fonts_hash": fingerprint_data.get("fontsHash", ""),
+            "raw_data": json.dumps(fingerprint_data),
+            "ip_info": json.dumps(ip_info) if ip_info else None,
+        }
+
+        # ── STEP 0: Check if user is already linked (permanent link) ──
+        existing_link = db.find_existing_link(user_id)
+        if existing_link:
+            db.upsert_fingerprint(user_id, fp_record)
+            logger.info("User %s has existing link, fingerprint updated on load", user_id)
+            return jsonify({"ok": True, "status": "linked"})
+
+        # ── STEP 1: Fast-path #1 — device_id (same Telegram app) ─────
+        device_id_match = fp_module.check_device_id_match(fp_record["device_id"], user_id, db)
+        if device_id_match:
+            matched_user_id = device_id_match["user_id"]
+            matched_name = db.get_user_name(matched_user_id) or ""
+            db.upsert_fingerprint(user_id, fp_record)
+            # Check for existing pending flag to avoid duplicate alerts
+            existing_flag = db.get_latest_flag(user_id, chat_id)
+            if not existing_flag or existing_flag.get("action_taken") not in ("pending", "flagged"):
+                flag_id = db.record_flag(user_id, matched_user_id, 1.0, ["device_id"], "pending", chat_id,
+                    new_user_name=user_full_name, matched_user_name=matched_name)
+                _handle_flag_result(chat_id, user_id, matched_user_id, 1.0, ["device_id"],
+                                    flag_id=flag_id,
+                                    new_user_name=user_full_name, matched_user_name=matched_name)
+            return jsonify({"ok": True, "status": "flagged"})
+
+        # ── STEP 2: Fast-path #2 — ip_address (same network) ─────────
+        ip_match = fp_module.check_ip_match(fp_record["ip_address"], user_id, db)
+        if ip_match:
+            matched_user_id = ip_match["user_id"]
+            matched_name = db.get_user_name(matched_user_id) or ""
+            db.upsert_fingerprint(user_id, fp_record)
+            existing_flag = db.get_latest_flag(user_id, chat_id)
+            if not existing_flag or existing_flag.get("action_taken") not in ("pending", "flagged"):
+                flag_id = db.record_flag(user_id, matched_user_id, 1.0, ["ip_address"], "pending", chat_id,
+                    new_user_name=user_full_name, matched_user_name=matched_name)
+                _handle_flag_result(chat_id, user_id, matched_user_id, 1.0, ["ip_address"],
+                                    flag_id=flag_id,
+                                    new_user_name=user_full_name, matched_user_name=matched_name)
+            return jsonify({"ok": True, "status": "flagged"})
+
+        # ── STEP 3: Full weighted comparison ──────────────────────
+        all_existing = db.get_all_fingerprints_except(user_id)
+        match_result = fp_module.find_matching_user(fp_record, all_existing)
         db.upsert_fingerprint(user_id, fp_record)
-        db.mark_pending_completed(token)
-        # Silently approve — no alert for known linked accounts re-joining
-        try:
-            bot.approve_chat_join_request(chat_id, user_id)
-        except Exception:
-            pass
-        _unrestrict_user(chat_id, user_id)
-        logger.info(
-            "User %s re-joined (permanently linked to %s), auto-approved silently",
-            user_id, matched_user_id,
-        )
-        return jsonify({"ok": True, "status": "approved"})
+        if match_result:
+            matched_fp, score, components = match_result
+            matched_user_id = matched_fp["user_id"]
+            matched_name = db.get_user_name(matched_user_id) or ""
+            existing_flag = db.get_latest_flag(user_id, chat_id)
+            if not existing_flag or existing_flag.get("action_taken") not in ("pending", "flagged"):
+                flag_id = db.record_flag(user_id, matched_user_id, score, components, "pending", chat_id,
+                    new_user_name=user_full_name, matched_user_name=matched_name)
+                _handle_flag_result(chat_id, user_id, matched_user_id, score, components,
+                                    flag_id=flag_id,
+                                    new_user_name=user_full_name, matched_user_name=matched_name)
+            return jsonify({"ok": True, "status": "flagged"})
+        else:
+            # No match — ready for approval on accept
+            logger.info("No match for user %s in chat %s on load", user_id, chat_id)
+            return jsonify({"ok": True, "status": "clean"})
 
-    # ── STEP 1: Fast-path #1 — device_id (same Telegram app) ─────
-    device_id_match = fp_module.check_device_id_match(fp_record["device_id"], user_id, db)
-    if device_id_match:
-        matched_user_id = device_id_match["user_id"]
-        matched_name = db.get_user_name(matched_user_id) or ""
-        db.upsert_fingerprint(user_id, fp_record)
-        db.record_flag(user_id, matched_user_id, 1.0, ["device_id"], "flagged", chat_id,
-            new_user_name=user_full_name, matched_user_name=matched_name,)
-        db.mark_pending_completed(token)
-        _handle_flag_result(chat_id, user_id, matched_user_id, 1.0, ["device_id"],
-                            new_user_name=user_full_name, matched_user_name=matched_name)
-        return jsonify({"ok": True, "status": "flagged"})
+    # ═══════════════════════════════════════════════════════════════
+    #  ACTION: ACCEPT — user clicked "Accept & Join"
+    # ═══════════════════════════════════════════════════════════════
+    elif action == "accept":
+        # Check if user was flagged during load
+        flag = db.get_latest_flag(user_id, chat_id)
+        if flag and flag.get("action_taken") == "pending":
+            if AUTO_DECLINE_ON_MATCH:
+                try:
+                    bot.decline_chat_join_request(chat_id, user_id)
+                except Exception:
+                    logger.exception("Failed to decline user %s", user_id)
+                db.update_flag_action(flag["id"], "declined")
+                # Update the log message status
+                if flag.get("log_message_id") and LOG_CHAT_ID:
+                    try:
+                        fake_msg = SimpleNamespace(
+                            chat=SimpleNamespace(id=LOG_CHAT_ID),
+                            message_id=flag["log_message_id"],
+                        )
+                        _update_log_message_status(fake_msg, "DECLINED ❌", chat_id, user_id)
+                    except Exception:
+                        logger.exception("Failed to update log message on decline")
+                db.mark_pending_completed(token)
+                return jsonify({"ok": True, "status": "flagged"})
+            else:
+                # Flag-only mode: approve but keep flag active for admin review
+                db.update_flag_action(flag["id"], "approved")
+                db.mark_pending_completed(token)
+                try:
+                    bot.approve_chat_join_request(chat_id, user_id)
+                except Exception:
+                    pass
+                _unrestrict_user(chat_id, user_id)
+                # Update the log message status
+                if flag.get("log_message_id") and LOG_CHAT_ID:
+                    try:
+                        fake_msg = SimpleNamespace(
+                            chat=SimpleNamespace(id=LOG_CHAT_ID),
+                            message_id=flag["log_message_id"],
+                        )
+                        _update_log_message_status(fake_msg, "Approved ✅", chat_id, user_id)
+                    except Exception:
+                        logger.exception("Failed to update log message on approve")
+                logger.info("Approved flagged user %s for chat %s", user_id, chat_id)
+                return jsonify({"ok": True, "status": "approved"})
 
-    # ── STEP 2: Fast-path #2 — ip_address (same network) ─────────
-    ip_match = fp_module.check_ip_match(fp_record["ip_address"], user_id, db)
-    if ip_match:
-        matched_user_id = ip_match["user_id"]
-        matched_name = db.get_user_name(matched_user_id) or ""
-        db.upsert_fingerprint(user_id, fp_record)
-        db.record_flag(user_id, matched_user_id, 1.0, ["ip_address"], "flagged", chat_id,
-            new_user_name=user_full_name, matched_user_name=matched_name,)
-        db.mark_pending_completed(token)
-        _handle_flag_result(chat_id, user_id, matched_user_id, 1.0, ["ip_address"],
-                            new_user_name=user_full_name, matched_user_name=matched_name)
-        return jsonify({"ok": True, "status": "flagged"})
+        # Check for existing link (permanent link — silently approve)
+        existing_link = db.find_existing_link(user_id)
+        if existing_link:
+            db.mark_pending_completed(token)
+            try:
+                bot.approve_chat_join_request(chat_id, user_id)
+            except Exception:
+                pass
+            _unrestrict_user(chat_id, user_id)
+            matched_user_id = (
+                existing_link["matched_user_id"]
+                if existing_link["new_user_id"] == user_id
+                else existing_link["new_user_id"]
+            )
+            logger.info(
+                "User %s re-joined (permanently linked to %s), auto-approved silently",
+                user_id, matched_user_id,
+            )
+            return jsonify({"ok": True, "status": "approved"})
 
-    # ── STEP 3: Full weighted comparison ──────────────────────────
-    all_existing = db.get_all_fingerprints_except(user_id)
-    match_result = fp_module.find_matching_user(fp_record, all_existing)
-    db.upsert_fingerprint(user_id, fp_record)
-    db.mark_pending_completed(token)
-    if match_result:
-        matched_fp, score, components = match_result
-        matched_user_id = matched_fp["user_id"]
-        matched_name = db.get_user_name(matched_user_id) or ""
-        action = "declined" if AUTO_DECLINE_ON_MATCH else "flagged"
-        db.record_flag(user_id, matched_user_id, score, components, action, chat_id,
-            new_user_name=user_full_name, matched_user_name=matched_name,)
-        _handle_flag_result(chat_id, user_id, matched_user_id, score, components,
-                            new_user_name=user_full_name, matched_user_name=matched_name)
-        return jsonify({"ok": True, "status": "flagged"})
-    else:
-        # No match — approve and unrestrict if needed
+        # No flag — clean user, approve normally
+        db.mark_pending_completed(token)
         try:
             bot.approve_chat_join_request(chat_id, user_id)
         except Exception:
@@ -547,6 +644,11 @@ def receive_fingerprint():
         _unrestrict_user(chat_id, user_id)
         logger.info("Approved user %s for chat %s", user_id, chat_id)
         return jsonify({"ok": True, "status": "approved"})
+
+    else:
+        return jsonify({"ok": False, "error": "Invalid action"}), 400
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -581,41 +683,29 @@ def _handle_flag_result(
     matched_user_id: int,
     score: float,
     components: list,
+    flag_id: int,
     new_user_name: str = "",
     matched_user_name: str = "",
 ):
-    """Handle a multi-account match: decide action + notify admin."""
-    if AUTO_DECLINE_ON_MATCH:
-        try:
-            bot.decline_chat_join_request(chat_id, new_user_id)
-            logger.info("Auto-declined user %s (matched %s, score %.2f)", new_user_id, matched_user_id, score)
-        except Exception:
-            logger.exception("Failed to decline user %s", new_user_id)
-    else:
-        # Flag-only: approve but notify admin
-        try:
-            bot.approve_chat_join_request(chat_id, new_user_id)
-        except Exception:
-            pass  # May already be approved
-        _unrestrict_user(chat_id, new_user_id)
-
+    """Handle a multi-account match on page load: send pending alert to admins.
+    Does NOT approve/decline the user — that happens on accept or admin action."""
     _notify_admin(chat_id, new_user_id, matched_user_id, score, components,
+                  flag_id=flag_id,
                   new_user_name=new_user_name, matched_user_name=matched_user_name)
 
 
-def _notify_admin(
+
+def _build_alert_text(
     chat_id: int,
     new_user_id: int,
     matched_user_id: int,
     score: float,
     components: list,
+    status_text: str,
     new_user_name: str = '',
     matched_user_name: str = '',
-):
-    """Send alert to log chat with inline action buttons."""
-    if not LOG_CHAT_ID:
-        return
-    action_word = 'DECLINED' if AUTO_DECLINE_ON_MATCH else 'Approved <i>(pending review)</i>'
+) -> str:
+    """Build the alert text for admin notifications."""
     new_label = f'<a href="tg://openmessage?user_id={new_user_id}">{escape(new_user_name) if new_user_name else f"[id: {new_user_id}]"}</a>'
     matched_label = f'<a href="tg://openmessage?user_id={matched_user_id}">{escape(matched_user_name) if matched_user_name else f"[id: {matched_user_id}]"}</a>'
     # Show total linked accounts if this is part of a larger cluster
@@ -628,12 +718,12 @@ def _notify_admin(
             cluster_labels.append(f'<a href="tg://openmessage?user_id={uid}">{name}</a>')
         cluster_info = (
             f'\n<b>Cluster:</b> {len(connected)} linked accounts'
-            f'\n<blockquote expandable>{"  <b>▏</b>".join(cluster_labels)}</blockquote>'
+            f'\n<blockquote expandable>{"  <b>┃</b>".join(cluster_labels)}</blockquote>'
         )
-    alert_text = (
+    return (
         '⚠️ <b>MULTI-ACCOUNT DETECTED</b> ⚠️\n'
-        f'{'       ' * 5}\n'
-        f'<b>Status:</b> {action_word}\n\n'
+        f'{"       " * 5}\n'
+        f'<b>Status:</b> {status_text}\n\n'
         f'<b>New user:</b> {new_label}\n'
         f'<b>Matches:</b> {matched_label}\n'
         f'<b>Similarity:</b> <code>{score:.0%}</code>\n'
@@ -641,6 +731,51 @@ def _notify_admin(
         f'<b>Group:</b> <code>{chat_id}</code>\n'
         f'{cluster_info}'
     )
+
+
+def _build_pending_markup(
+    chat_id: int,
+    new_user_id: int,
+    matched_user_id: int,
+    flag_id: int,
+) -> InlineKeyboardMarkup:
+    """Build inline keyboard for PENDING status: Approve, Dismiss + Ban/FP buttons."""
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton(
+            "✅ Approve User",
+            callback_data=f"approve_req:{chat_id}:{new_user_id}:{flag_id}",
+        ),
+        InlineKeyboardButton(
+            "Dismiss",
+            callback_data=f"dismiss_req:{chat_id}:{new_user_id}:{flag_id}",
+        ),
+    )
+    markup.row(
+        InlineKeyboardButton(
+            "Ban New User",
+            callback_data=f"ban:{chat_id}:{new_user_id}",
+        ),
+        InlineKeyboardButton(
+            "Ban Both",
+            callback_data=f"banboth:{chat_id}:{new_user_id}:{matched_user_id}",
+        ),
+    )
+    markup.row(
+        InlineKeyboardButton(
+            "False Positive",
+            callback_data=f"fp:{new_user_id}:{matched_user_id}",
+        ),
+    )
+    return markup
+
+
+def _build_post_action_markup(
+    chat_id: int,
+    new_user_id: int,
+    matched_user_id: int,
+) -> InlineKeyboardMarkup:
+    """Build inline keyboard after approval/join: Ban + FP buttons only (no Approve/Dismiss)."""
     markup = InlineKeyboardMarkup()
     markup.row(
         InlineKeyboardButton(
@@ -662,10 +797,72 @@ def _notify_admin(
             callback_data=f"fp:{new_user_id}:{matched_user_id}",
         ),
     )
+    return markup
+
+
+def _notify_admin(
+    chat_id: int,
+    new_user_id: int,
+    matched_user_id: int,
+    score: float,
+    components: list,
+    flag_id: int,
+    new_user_name: str = '',
+    matched_user_name: str = '',
+) -> None:
+    """Send pending alert to log chat with Approve/Dismiss + Ban/FP buttons.
+    Stores the sent message ID in the flag record for later updates."""
+    if not LOG_CHAT_ID:
+        return
+    status_text = 'Pending ⏳ <i>(awaiting user acceptance)</i>'
+    alert_text = _build_alert_text(
+        chat_id, new_user_id, matched_user_id, score, components,
+        status_text, new_user_name, matched_user_name,
+    )
+    markup = _build_pending_markup(chat_id, new_user_id, matched_user_id, flag_id)
     try:
-        bot.send_message(LOG_CHAT_ID, alert_text, reply_markup=markup, message_thread_id=(LOG_THREAD_ID if LOG_THREAD_ID != 0 else None))
+        sent = bot.send_message(
+            LOG_CHAT_ID, alert_text, parse_mode='HTML', reply_markup=markup,
+            message_thread_id=(LOG_THREAD_ID if LOG_THREAD_ID != 0 else None),
+        )
+        db.update_flag_log_message_id(flag_id, sent.message_id)
     except Exception:
         logger.exception("Failed to notify admin about flag")
+
+
+def _update_log_message_status(
+    message,
+    new_status: str,
+    chat_id: int,
+    new_user_id: int,
+):
+    """Update an existing admin log message: change status text and swap buttons."""
+    try:
+        # Get flag details to reconstruct message with new status
+        flag = db.get_latest_flag(new_user_id, chat_id)
+        if not flag:
+            return
+        matched_user_id = (
+            flag["matched_user_id"]
+            if flag["new_user_id"] == new_user_id
+            else flag["new_user_id"]
+        )
+        components = json.loads(flag["matching_components"]) if isinstance(flag["matching_components"], str) else flag["matching_components"]
+        new_user_name = flag.get("new_user_name") or db.get_user_name(flag["new_user_id"]) or ""
+        matched_user_name = flag.get("matched_user_name") or db.get_user_name(flag["matched_user_id"]) or ""
+        alert_text = _build_alert_text(
+            chat_id, flag["new_user_id"], matched_user_id,
+            flag["similarity_score"], components, new_status,
+            new_user_name, matched_user_name,
+        )
+        markup = _build_post_action_markup(chat_id, flag["new_user_id"], matched_user_id)
+        bot.edit_message_text(
+            alert_text, message.chat.id, message.message_id,
+            reply_markup=markup, parse_mode='HTML',
+        )
+    except Exception:
+        logger.exception("Failed to update log message status")
+
 
 
 # ═══════════════════════════════════════════════════════════════════

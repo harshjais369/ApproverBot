@@ -76,6 +76,12 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_flags_matched ON flags(matched_user_id);
     """)
     conn.commit()
+    # Auto-migration: add log_message_id column to flags if missing
+    try:
+        conn.execute("ALTER TABLE flags ADD COLUMN log_message_id INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 
 
 # ── Pending Requests ──────────────────────────────────────────────
@@ -136,6 +142,17 @@ def mark_pending_completed(token: str) -> None:
     conn.execute(
         "UPDATE pending_requests SET status = 'completed' WHERE token = ?",
         (token,),
+    )
+    conn.commit()
+
+
+def mark_pending_completed_by_user(user_id: int, chat_id: int) -> None:
+    """Mark all pending requests for a user/chat as completed (no token needed)."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE pending_requests SET status = 'completed' "
+        "WHERE user_id = ? AND chat_id = ? AND status IN ('pending', 'restricted')",
+        (user_id, chat_id),
     )
     conn.commit()
 
@@ -266,6 +283,37 @@ def mark_false_positive(new_user_id: int, matched_user_id: int) -> None:
     )
     conn.commit()
 
+
+def update_flag_log_message_id(flag_id: int, log_message_id: int) -> None:
+    """Store the Telegram message ID of the admin alert for a flag."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE flags SET log_message_id = ? WHERE id = ?",
+        (log_message_id, flag_id),
+    )
+    conn.commit()
+
+
+def update_flag_action(flag_id: int, action: str) -> None:
+    """Update the action_taken status of a flag."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE flags SET action_taken = ? WHERE id = ?",
+        (action, flag_id),
+    )
+    conn.commit()
+
+
+def get_latest_flag(user_id: int, chat_id: int) -> Optional[dict]:
+    """Get the most recent flag for a user in a specific chat.
+    Prefers flags where the user is new_user_id over matched_user_id."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM flags WHERE (new_user_id = ? OR matched_user_id = ?) "
+        "AND chat_id = ? ORDER BY (new_user_id = ?) DESC, id DESC LIMIT 1",
+        (user_id, user_id, chat_id, user_id),
+    ).fetchone()
+    return dict(row) if row else None
 
 def find_existing_link(user_id: int) -> Optional[dict]:
     """

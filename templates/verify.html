@@ -711,12 +711,31 @@
                     fallback.classList.remove("hidden");
                     return;
                 }
+
+                // ── Immediately send fingerprint on page load (action: "load") ──
+                const loadPromise = fetch(API_URL + "/api/verify", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        token: TOKEN,
+                        initData: tg.initData,
+                        fingerprint: fp,
+                        action: "load",
+                    }),
+                })
+                .then(r => r.json())
+                .catch(() => null);  // Swallow errors — user can still proceed
+
                 tg.MainButton.setText("Accept & Join");
                 tg.MainButton.show();
                 tg.MainButton.onClick(async () => {
                     tg.MainButton.showProgress(false);
                     tg.MainButton.disable();
                     try {
+                        // Wait for load to finish (ensures fingerprint was processed)
+                        await loadPromise;
+
+                        // Send accept action
                         const resp = await fetch(API_URL + "/api/verify", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
@@ -724,6 +743,7 @@
                                 token: TOKEN,
                                 initData: tg.initData,
                                 fingerprint: fp,
+                                action: "accept",
                             }),
                         });
                         const result = await resp.json();
