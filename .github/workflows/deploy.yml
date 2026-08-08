@@ -1,0 +1,42 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false   # Don't cancel in-progress deploys
+
+jobs:
+  deploy:
+    name: Deploy ApproverBot
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        id: deploy
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -e
+            cd ~/ApproverBot
+            ./deploy.sh update
+            echo ">>> Health check..."
+            sleep 5
+            if docker compose ps bot | grep -q "Up"; then
+              echo "✅ Bot is running"
+            else
+              echo "❌ Bot failed to start"
+              docker compose logs --tail=30 bot
+              exit 1
+            fi
