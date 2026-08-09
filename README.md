@@ -10,7 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12+-blue?logo=python&logoColor=white" alt="Python 3.12+" />
-  <img src="https://img.shields.io/badge/Telegram%20Bot%20API-10.1-229ED9?logo=telegram&logoColor=white" alt="Bot API 10.1" />
+  <img src="https://img.shields.io/badge/Telegram%20Bot%20API-10.1+-229ED9?logo=telegram&logoColor=white" alt="Bot API 10.1+" />
   <img src="https://img.shields.io/badge/Flask-3.0+-000000?logo=flask" alt="Flask" />
   <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker" />
   <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License" />

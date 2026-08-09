@@ -115,7 +115,7 @@ def handle_connections(message):
     elif message.reply_to_message:
         target_uid = message.reply_to_message.from_user.id
     else:
-        bot.reply_to(message, '<b>Usage:</b> /links &lt;user_id&gt; | reply to user', parse_mode="HTML")
+        bot.reply_to(message, '<b>Usage:</b> /links &lt;user_id | reply to user&gt;', parse_mode="HTML")
         return
     connected = db.get_all_connected_users(target_uid)
     if len(connected) <= 1:
