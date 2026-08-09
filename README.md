@@ -2,7 +2,7 @@
   <img src="static/branding/crocodile-game-logo.jpg" width="120" alt="Crocodile Games Logo" style="border-radius: 50%;" />
 </p>
 
-<h1 align="center">ApproverBot</h1>
+<h1 align="center">Approver Bot</h1>
 
 <p align="center">
   <b>Telegram Join Request Verification &amp; Multi-Account Detection Bot</b>
@@ -14,6 +14,9 @@
   <img src="https://img.shields.io/badge/Flask-3.0+-000000?logo=flask" alt="Flask" />
   <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker" />
   <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License" />
+  <a href="https://github.com/harshjais369/ApproverBot/actions/workflows/deploy.yml">
+    <img src="https://github.com/harshjais369/ApproverBot/actions/workflows/deploy.yml/badge.svg" alt="Deploy to VPS" />
+  </a>
 </p>
 
 <p align="center">
@@ -48,7 +51,7 @@
 
 ## Overview
 
-**ApproverBot** is the anti-abuse gatekeeper for the [Crocodile Games](https://t.me/CrocodileGames) Telegram community. When a user requests to join a protected group, the bot intercepts the request, serves a Telegram Mini Web App for verification, silently collects a browser fingerprint, and cross-references it against all known users to detect multi-account abuse — all before the user even clicks "Accept & Join".
+**Approver Bot** is the anti-abuse gatekeeper for the [Crocodile Games](https://t.me/CrocodileGames) Telegram community. When a user requests to join a protected group, the bot intercepts the request, serves a Telegram Mini Web App for verification, silently collects a browser fingerprint, and cross-references it against all known users to detect multi-account abuse — all before the user even clicks "Accept & Join".
 
 Built for **Bot API 10.1** (June 2026), it supports the new `sendChatJoinRequestWebApp` flow alongside a robust legacy DM fallback for maximum compatibility.
 
