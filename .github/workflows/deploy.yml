@@ -17,6 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    # Force manual approval before deploying
+    environment:
+      name: production
+      url: https://tx.me/approver0bot
+
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
@@ -26,7 +31,6 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script_stop: true
           script: |
             set -e
             cd ~/ApproverBot
