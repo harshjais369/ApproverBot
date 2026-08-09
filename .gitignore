@@ -1,9 +1,50 @@
+# ── Python ──────────────────────────────────────
 /__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# ── Virtual environments ───────────────────────
+/venv/
+/.venv/
+env/
+
+# ── Secrets & environment (CRITICAL) ───────────
 .env
-/venv
-/.venv
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+
+# ── Database ───────────────────────────────────
 *.db
-*.db-*
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite3
+
+# ── Logs ───────────────────────────────────────
 *.log
-/experiments
+logs/
+
+# ── Backups ────────────────────────────────────
 /backups/
+
+# ── Experiments / scratch ──────────────────────
+/experiments/
+/vps/
+
+# ── IDE / Editor ───────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

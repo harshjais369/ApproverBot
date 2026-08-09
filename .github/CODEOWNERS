@@ -1,0 +1,17 @@
+# This CODEOWNERS file defines who must review PRs that touch specific paths.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything — all PRs require review from the owner
+* @harshjais369
+
+# Critical files — extra visibility
+bot.py              @harshjais369
+database.py         @harshjais369
+fingerprint.py      @harshjais369
+validation.py       @harshjais369
+config.py           @harshjais369
+deploy.sh           @harshjais369
+docker-compose.yml  @harshjais369
+Dockerfile          @harshjais369
+nginx/              @harshjais369
+.github/            @harshjais369
