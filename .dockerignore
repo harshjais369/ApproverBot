@@ -12,5 +12,7 @@ __pycache__/
 nginx/
 docker-compose.yml
 deploy.sh
+backups/
 experiments/
 *.log
+*.md
