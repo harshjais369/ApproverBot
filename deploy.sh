@@ -50,7 +50,7 @@ echo ">>> Waiting for nginx to be ready..."
 sleep 3
 
 echo ">>> Obtaining SSL certificate from Let's Encrypt..."
-docker compose run --rm certbot certonly \
+docker compose run --rm --entrypoint="certbot" certbot certonly \
     --webroot \
     --webroot-path /var/www/certbot \
     --email "$EMAIL" \
@@ -61,6 +61,9 @@ docker compose run --rm certbot certonly \
 echo ">>> Restoring production nginx config (HTTPS)..."
 cp "${NGINX_CONF}.bak" "$NGINX_CONF"
 rm -f "${NGINX_CONF}.bak"
+
+echo ">>> Ensuring correct database file permissions..."
+docker compose run --rm --user root bot chown -R botuser:botgroup /app/data
 
 echo ">>> Starting all services..."
 docker compose up -d
