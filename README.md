@@ -67,7 +67,7 @@ Built for **Bot API 10.1** (June 2026), it supports the new `sendChatJoinRequest
 | 📊 **Weighted Similarity Scoring** | 11-component weighted algorithm with configurable thresholds (default 75%) |
 | 🔗 **Transitive Cluster Detection** | Discovers multi-account clusters via recursive graph traversal (A↔B, B↔C → {A,B,C}) |
 | 🌐 **IP Geolocation Enrichment** | Enriches fingerprints with ISP, location, and mobile-network data via ip-api.com |
-| 🛡️ **Bot API 10.1 Support** | Native `sendChatJoinRequestWebApp` + `answerChatJoinRequestQuery` via monkey-patch |
+| 🛡️ **Bot API 10.1 Support** | Native `sendChatJoinRequestWebApp` + `answerChatJoinRequestQuery` via official TeleBot support |
 | 📩 **Admin Notification System** | Real-time alerts in a log chat with approve/ban/dismiss/false-positive inline buttons |
 | 🐳 **Production Docker Stack** | Nginx + Let's Encrypt + Flask + Bot in a hardened Docker Compose setup |
 | 🚀 **CI/CD via GitHub Actions** | Push-to-deploy pipeline with SSH and health checks |
@@ -245,7 +245,6 @@ ApproverBot/
 ├── database.py                 # SQLite data layer (WAL mode, indexed)
 ├── fingerprint.py              # Fingerprint comparison engine
 ├── validation.py               # Telegram initData HMAC-SHA256 validation
-├── patch_telebot.py            # Monkey-patch for Bot API 10.1 join request queries
 ├── requirements.txt            # Python dependencies
 ├── Dockerfile                  # Multi-stage production image (non-root user)
 ├── docker-compose.yml          # Full stack: bot + nginx + certbot

@@ -14,7 +14,6 @@ from telebot.types import (
     ChatPermissions,
 )
 from telebot.util import escape
-import patch_telebot  # Bot API 10.1 join request queries
 from flask import Flask, request, render_template, jsonify, redirect
 
 from config import *
@@ -160,8 +159,8 @@ def handle_join_request(jr):
     Triggered when a user requests to join a group where the bot is admin
     with 'Approve new members' permission.
 
-    Bot API 10.1: If the request carries a `query_id`, the bot can open
-    a Mini App directly via sendChatJoinRequestWebApp — no DM needed.
+    If the request carries a `query_id`, the bot can open a Mini App
+    directly via sendChatJoinRequestWebApp — no DM needed.
     """
     chat_id = jr.chat.id
     user_id = jr.from_user.id
