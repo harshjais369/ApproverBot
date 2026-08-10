@@ -11,12 +11,12 @@ This repository contains **Approver Bot**, a Python 3.12+ Telegram moderation bo
 - Docker / Docker Compose (production stack with nginx + certbot)
 
 ## Key Entry Points
-- `/home/runner/work/ApproverBot/ApproverBot/bot.py` — main bot + Flask routes
-- `/home/runner/work/ApproverBot/ApproverBot/config.py` — environment configuration
-- `/home/runner/work/ApproverBot/ApproverBot/database.py` — SQLite data access
-- `/home/runner/work/ApproverBot/ApproverBot/fingerprint.py` — fingerprint matching logic
-- `/home/runner/work/ApproverBot/ApproverBot/validation.py` — Telegram `initData` validation
-- `/home/runner/work/ApproverBot/ApproverBot/templates/verify.html` — Mini Web App verification page
+- `/bot.py` — main bot + Flask routes
+- `/config.py` — environment configuration
+- `/database.py` — SQLite data access
+- `/fingerprint.py` — fingerprint matching logic
+- `/validation.py` — Telegram `initData` validation
+- `/templates/verify.html` — Mini Web App verification page
 
 ## Local Development
 1. Create and activate a virtual environment.
@@ -49,7 +49,7 @@ Follow `CONTRIBUTING.md`:
 
 ## Deployment Notes
 - CI/CD deploy workflow is defined at:
-  - `/home/runner/work/ApproverBot/ApproverBot/.github/workflows/deploy.yml`
+  - `/.github/workflows/deploy.yml`
 - Production runtime uses Docker Compose and nginx configuration under:
-  - `/home/runner/work/ApproverBot/ApproverBot/docker-compose.yml`
-  - `/home/runner/work/ApproverBot/ApproverBot/nginx/`
+  - `/docker-compose.yml`
+  - `/nginx/`
