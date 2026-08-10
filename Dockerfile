@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Create a non-root user to run the app
 RUN addgroup --system botgroup && adduser --system --ingroup botgroup botuser
