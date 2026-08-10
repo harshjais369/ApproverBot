@@ -67,7 +67,7 @@ Built for **Bot API 10.1** (June 2026), it supports the new `sendChatJoinRequest
 | 📊 **Weighted Similarity Scoring** | 11-component weighted algorithm with configurable thresholds (default 75%) |
 | 🔗 **Transitive Cluster Detection** | Discovers multi-account clusters via recursive graph traversal (A↔B, B↔C → {A,B,C}) |
 | 🌐 **IP Geolocation Enrichment** | Enriches fingerprints with ISP, location, and mobile-network data via ip-api.com |
-| 🛡️ **Bot API 10.1 Support** | Native `sendChatJoinRequestWebApp` + `answerChatJoinRequestQuery` via official TeleBot support |
+| 🛡️ **Bot API 10.1 Support** | Native `sendChatJoinRequestWebApp` + `answerChatJoinRequestQuery` via official TeleBot support (requires an up-to-date pyTelegramBotAPI release that includes Bot API 10.1 join-request query APIs) |
 | 📩 **Admin Notification System** | Real-time alerts in a log chat with approve/ban/dismiss/false-positive inline buttons |
 | 🐳 **Production Docker Stack** | Nginx + Let's Encrypt + Flask + Bot in a hardened Docker Compose setup |
 | 🚀 **CI/CD via GitHub Actions** | Push-to-deploy pipeline with SSH and health checks |
