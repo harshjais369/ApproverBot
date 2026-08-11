@@ -11,20 +11,21 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false   # Don't cancel in-progress deploys
 
+permissions: {}
+
 jobs:
   deploy:
     name: Deploy ApproverBot
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    # Force manual approval before deploying
     environment:
       name: production
       url: https://tx.me/approver0bot
 
     steps:
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17
         id: deploy
         with:
           host: ${{ secrets.SSH_HOST }}
