@@ -116,12 +116,16 @@ def handle_connections(message):
     else:
         bot.reply_to(message, '<b>Usage:</b> /links &lt;user_id | reply to user&gt;', parse_mode="HTML")
         return
+    fp = db.get_fingerprint(target_uid)
+    if not fp:
+        bot.reply_to(message, f'No fingerprint data found for user <code>{target_uid}</code>.')
+        return
     connected = db.get_all_connected_users(target_uid)
+    target_name = escape(fp.get("full_name") or db.get_user_name(target_uid) or f'[id: {str(target_uid)}]')
     if len(connected) <= 1:
-        bot.reply_to(message, f'User {target_uid} has no linked accounts.')
+        bot.reply_to(message, f'User <a href="tg://openmessage?user_id={target_uid}">{target_name}</a> (<code>{target_uid}</code>) has no linked accounts.')
         return
     details = db.get_connection_details(target_uid)
-    target_name = escape(db.get_user_name(target_uid) or f'[id: {str(target_uid)}]')
     connected_labels = []
     for uid in sorted(connected):
         name = escape(db.get_user_name(uid) or f'[id: {str(uid)}]')
@@ -150,6 +154,121 @@ def handle_connections(message):
             f'<b>Time:</b> {ts}'
             '</blockquote>'
         )
+    bot.reply_to(message, '\n'.join(lines))
+
+
+@bot.message_handler(commands=["fingerprint", "fp"])
+def handle_fingerprint(message):
+    """Show detailed fingerprint information for a user with rich formatting."""
+    if message.from_user.id not in SUPERUSERS:
+        return
+    # Parse target user: /fingerprint <user_id> or reply to a message
+    parts = message.text.split()
+    target_uid = None
+    if len(parts) >= 2:
+        try:
+            target_uid = int(parts[1])
+        except ValueError:
+            bot.reply_to(message, 'Invalid user ID!')
+            return
+    elif message.reply_to_message:
+        target_uid = message.reply_to_message.from_user.id
+    else:
+        bot.reply_to(message, '<b>Usage:</b> /fingerprint &lt;user_id | reply to user&gt;')
+        return
+    fp = db.get_fingerprint(target_uid)
+    if not fp:
+        bot.reply_to(message, f'No fingerprint data found for user <code>{target_uid}</code>.')
+        return
+    user_name = escape(fp.get("full_name") or f"[id: {target_uid}]")
+    user_link = f'<a href="tg://openmessage?user_id={target_uid}">{user_name}</a>'
+    # ── Parse IP info ──
+    ip_info = {}
+    if fp.get("ip_info"):
+        try:
+            ip_info = json.loads(fp["ip_info"]) if isinstance(fp["ip_info"], str) else fp["ip_info"]
+        except (json.JSONDecodeError, TypeError):
+            pass
+    # ── Parse languages ──
+    languages_str = ''
+    if fp.get("languages"):
+        try:
+            langs = json.loads(fp["languages"]) if isinstance(fp["languages"], str) else fp["languages"]
+            languages_str = ', '.join(str(l) for l in langs) if langs else '—'
+        except (json.JSONDecodeError, TypeError):
+            languages_str = escape(str(fp["languages"]))
+    # ── Helper for display values ──
+    def val(v, fallback='—'):
+        if v is None or v == '':
+            return fallback
+        return escape(str(v))
+    # ── Multi-account links ──
+    connected = db.get_all_connected_users(target_uid)
+    cluster_section = ''
+    if len(connected) > 1:
+        cluster_labels = []
+        for uid in sorted(connected):
+            name = escape(db.get_user_name(uid) or f'[id: {str(uid)}]')
+            marker = ' ← <i>this user</i>' if uid == target_uid else ''
+            cluster_labels.append(f'<a href="tg://openmessage?user_id={uid}">{name}</a>{marker}')
+        cluster_section = (
+            '\n\n🔗 <b>Linked Accounts</b>\n'
+            f'<blockquote>{chr(10).join("• " + lbl for lbl in cluster_labels)}</blockquote>'
+        )
+    # ── Build message ──
+    lines = [
+        f'🔎 <b>Fingerprint — {user_link}</b>',
+        f'<code>{"───" * 9}</code>',
+        '',
+        '👤 <b>Identity</b>',
+        f'<blockquote>'
+        f'<b>User ID:</b>  <code>{target_uid}</code>\n'
+        f'<b>Name:</b>  {user_name}'
+        f'</blockquote>',
+        '',
+        '📱 <b>Device &amp; Browser</b>',
+        f'<blockquote>'
+        f'<b>Platform:</b>  <code>{val(fp.get("platform"))}</code>\n'
+        f'<b>Screen:</b>  <code>{val(fp.get("screen_resolution"))}</code>\n'
+        f'<b>Touch:</b>  <code>{val(fp.get("touch_points"))}</code>\n'
+        f'<b>Memory:</b>  <code>{val(fp.get("device_memory"))} GB</code>\n'
+        f'<b>CPU cores:</b>  <code>{val(fp.get("hardware_concurrency"))}</code>'
+        f'</blockquote>',
+        '',
+        f'<blockquote expandable>'
+        f'<b>User-Agent:</b>\n<code>{val(fp.get("user_agent"))}</code>'
+        f'</blockquote>',
+        '',
+        '🌐 <b>Network &amp; Location</b>',
+        f'<blockquote>'
+        f'<b>IP:</b>  <code>{val(fp.get("ip_address"))}</code>\n'
+        f'<b>ISP:</b>  {val(ip_info.get("isp"))}\n'
+        f'<b>Location:</b>  {val(ip_info.get("location"))}\n'
+        f'<b>Mobile:</b>  {"Yes" if ip_info.get("mobile") else "No"}'
+        f'</blockquote>',
+        '',
+        '🌍 <b>Locale</b>',
+        f'<blockquote>'
+        f'<b>Timezone:</b>  <code>{val(fp.get("timezone"))}</code>\n'
+        f'<b>UTC offset:</b>  <code>{val(fp.get("timezone_offset"))} min</code>\n'
+        f'<b>Languages:</b>  <code>{languages_str or "—"}</code>'
+        f'</blockquote>',
+        '',
+        '🧬 <b>Fingerprint Hashes</b>',
+        f'<blockquote expandable>'
+        f'<b>Device ID:</b>\n<code>{val(fp.get("device_id"))}</code>\n\n'
+        f'<b>Canvas:</b>\n<code>{val(fp.get("canvas_hash"))}</code>\n\n'
+        f'<b>WebGL:</b>\n<code>{val(fp.get("webgl_hash"))}</code>\n\n'
+        f'<b>Audio:</b>\n<code>{val(fp.get("audio_hash"))}</code>\n\n'
+        f'<b>Fonts:</b>\n<code>{val(fp.get("fonts_hash"))}</code>'
+        f'</blockquote>',
+        '',
+        f'<code>{"───" * 9}</code>',
+        f'🕐 <b>First seen:</b> {val(fp.get("created_at"))}',
+        f'🔄 <b>Last update:</b> {val(fp.get("updated_at"))}',
+    ]
+    if cluster_section:
+        lines.append(cluster_section)
     bot.reply_to(message, '\n'.join(lines))
 
 

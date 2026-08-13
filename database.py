@@ -241,6 +241,13 @@ def find_by_ip(ip_address: str, exclude_user_id: int) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def get_fingerprint(user_id: int) -> Optional[dict]:
+    """Return the full fingerprint record for a user, or None if not found."""
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM fingerprints WHERE user_id = ?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def get_user_name(user_id: int) -> Optional[str]:
     """Look up the stored full_name for a user from their fingerprint record."""
     conn = _get_conn()
