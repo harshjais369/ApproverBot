@@ -35,6 +35,9 @@ jobs:
           script: |
             set -e
             cd ~/ApproverBot
+            echo ">>> Backing up DB"
+            ./backup-db.sh
+            echo ">>> Deploying latest changes"
             ./deploy.sh update
             echo ">>> Health check..."
             sleep 5
