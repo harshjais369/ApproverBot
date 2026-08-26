@@ -24,3 +24,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Security policy (SECURITY.md)
 - Contributing guidelines (CONTRIBUTING.md)
 - Code of Conduct
+- `/fingerprint` (or `/fp`) command for viewing detailed user fingerprint data
+- `restore-db.sh` script for safely restoring database backups into the Docker container
+- `AGENTS.md` documentation for AI assistant guidance
+- Dependabot configuration for automated dependency updates
+- `FUNDING.yml` for project sponsorship
+- Explicit permission blocks in GitHub Actions workflows
+
+### Changed
+- Enhanced the `/links` (and `/connections`) command output
+- Updated deploy script to automatically back up the database before re-deploying
+- Updated `README.md` to document new commands, restore scripts, updated schemas, and accurate CI/CD workflow steps
+- Bumped Python base image from `3.12-slim` to `3.14-slim`
+- Updated project dependencies (`pyTelegramBotAPI`, `Flask`, `python-dotenv`, `appleboy/ssh-action`)
+- Minor updates to group terms and conditions
+
+### Removed
+- Removed TeleBot Bot API 10.1 monkey patch (now supported natively)

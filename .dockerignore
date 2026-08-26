@@ -1,18 +1,32 @@
-.venv/
 .git/
+.github/
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Python environments & cache
+.venv/
+.env/
 .env
 .env.example
-*.db
-*.db-wal
-*.db-shm
 __pycache__/
 *.pyc
 *.pyo
-.gitignore
-nginx/
-docker-compose.yml
-deploy.sh
+
+# Databases and runtime data
+*.db
+*.db-wal
+*.db-shm
 backups/
+
+# Project management & noise
+nginx/*
+*.sh
 experiments/
 *.log
 *.md
+
+# Exceptions
+!static/CrocBot_Usage_Guide.md
+!nginx/nginx.conf

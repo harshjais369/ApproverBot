@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker" />
   <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License" />
   <a href="https://github.com/harshjais369/ApproverBot/actions/workflows/deploy.yml">
-    <img src="https://github.com/harshjais369/ApproverBot/actions/workflows/deploy.yml/badge.svg" alt="Deploy to VPS" />
+    <img src="https://github.com/harshjais369/ApproverBot/actions/workflows/deploy.yml/badge.svg?branch=main&event=push" alt="Deploy to VPS" />
   </a>
 </p>
 
@@ -80,9 +80,9 @@ Built for **Bot API 10.1** (June 2026), it supports the new `sendChatJoinRequest
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              INTERNET                                       │
 │                                                                             │
-│   Telegram User ──▶ Join Request ──▶ Telegram Bot API ──▶ Bot (polling)     │
+│   Telegram User ──▶ Join Request ──▶ Telegram Bot API ──▶ Bot (polling)   │
 │                                                                             │
-│   User Browser ──▶ HTTPS ──▶ Nginx (:443) ──▶ Flask (:5000) ──▶ SQLite     │
+│   User Browser ──▶ HTTPS ──▶ Nginx (:443) ──▶ Flask (:5000) ──▶ SQLite    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -357,18 +357,18 @@ The production stack runs three containers orchestrated by Docker Compose:
 
 ```
 ┌────────────────────────────────────────────────────┐
-│                Docker Compose Stack                 │
-│                                                     │
-│  ┌─────────────┐  ┌──────────┐  ┌──────────────┐  │
-│  │   Nginx     │  │   Bot    │  │   Certbot    │  │
-│  │  :80/:443   │──│  :5000   │  │  (renewal)   │  │
-│  │  TLS + Rate │  │  Flask + │  │  Let's       │  │
-│  │  Limiting   │  │  Telegram│  │  Encrypt     │  │
-│  └─────────────┘  └──────────┘  └──────────────┘  │
-│         │              │                            │
-│         ▼              ▼                            │
-│    certbot_conf    db_data                          │
-│    certbot_www     (SQLite)                         │
+│                Docker Compose Stack                │
+│                                                    │
+│  ┌─────────────┐  ┌──────────┐  ┌──────────────┐   │
+│  │   Nginx     │  │   Bot    │  │   Certbot    │   │
+│  │  :80/:443   │──│  :5000   │  │  (renewal)   │   │
+│  │  TLS + Rate │  │ Flask +  │  │  Let's       │   │
+│  │  Limiting   │  │ Telegram │  │  Encrypt     │   │
+│  └─────────────┘  └──────────┘  └──────────────┘   │
+│         │              │                           │
+│         ▼              ▼                           │
+│    certbot_conf     db_data                        │
+│    certbot_www      (SQLite)                       │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -418,6 +418,8 @@ All commands are restricted to `SUPERUSERS` only:
 | `/connections` | `/connections <user_id>` or reply | Show all linked accounts and detection history for a specific user |
 | `/links` | Alias for `/connections` | Same as `/connections` |
 | `/conns` | Alias for `/connections` | Same as `/connections` |
+| `/fingerprint` | `/fingerprint <user_id>` or reply | Show detailed fingerprint information for a user |
+| `/fp` | Alias for `/fingerprint` | Same as `/fingerprint` |
 
 ### Inline Admin Actions
 
@@ -518,6 +520,7 @@ Stores browser fingerprint data (one row per user, upserted on each verification
 |:-------|:-----|:------------|
 | `id` | INTEGER PK | Auto-increment ID |
 | `user_id` | INTEGER | Telegram user ID |
+| `full_name` | TEXT | User's full name |
 | `device_id` | TEXT | localStorage UUID |
 | `canvas_hash` | TEXT | Canvas rendering hash |
 | `webgl_hash` | TEXT | WebGL renderer hash |
@@ -528,6 +531,10 @@ Stores browser fingerprint data (one row per user, upserted on each verification
 | `platform` | TEXT | OS platform |
 | `languages` | TEXT (JSON) | Browser languages array |
 | `timezone` | TEXT | IANA timezone |
+| `timezone_offset` | INTEGER | UTC offset in minutes |
+| `touch_points` | INTEGER | Max touch points |
+| `device_memory` | REAL | Device memory in GB |
+| `hardware_concurrency` | INTEGER | Logical CPU cores |
 | `fonts_hash` | TEXT | Installed fonts hash |
 | `ip_info` | TEXT (JSON) | `{isp, location, mobile}` |
 | `raw_data` | TEXT (JSON) | Full fingerprint payload |
@@ -540,7 +547,9 @@ Records every multi-account detection event.
 |:-------|:-----|:------------|
 | `id` | INTEGER PK | Auto-increment ID |
 | `new_user_id` | INTEGER | The incoming user |
+| `new_user_name` | TEXT | The incoming user's name |
 | `matched_user_id` | INTEGER | The existing user they matched |
+| `matched_user_name` | TEXT | The existing user's name |
 | `similarity_score` | REAL | 0.0 – 1.0 similarity score |
 | `matching_components` | TEXT (JSON) | List of matched signal names |
 | `action_taken` | TEXT | `pending` / `flagged` / `approved` / `declined` / `false_positive` |
@@ -552,7 +561,7 @@ Records every multi-account detection event.
 
 ## Backup & Restore
 
-### Automated Backup
+### Backup Database
 
 ```bash
 # Run the hot-backup script (safe for live databases)
@@ -561,18 +570,23 @@ Records every multi-account detection event.
 
 This performs a **SQLite online backup** inside the running container, copies it to the host, and retains the last 7 days of backups.
 
-### Manual Backup
-
-```bash
-# Copy the live database from the Docker volume
-docker cp approverbot-bot-1:/app/data/approverbot.db ./backup.db
-```
-
-### Scheduled Backups (cron)
+### Auto Backups (cron)
 
 ```bash
 # Add to crontab: daily backup at 3 AM
 0 3 * * * cd /path/to/ApproverBot && ./backup-db.sh >> /var/log/approverbot-backup.log 2>&1
+```
+
+### Restore from Backup
+
+To safely restore a SQLite database backup into the running Docker container:
+
+```bash
+# Restore a specific backup file
+./restore-db.sh path/to/backup.db
+
+# Or, automatically restore the latest backup from backups/ directory
+./restore-db.sh
 ```
 
 ---
@@ -585,16 +599,15 @@ The project uses **GitHub Actions** for automated deployments:
 graph LR
     A["Push to main"] --> B["GitHub Actions<br/>deploy.yml"]
     B --> C["SSH into VPS"]
-    C --> D["git pull"]
-    D --> E["docker compose build<br/>--no-cache bot"]
-    E --> F["docker compose up -d bot"]
-    F --> G{{"Health Check<br/>(5s delay)"}}
-    G -->|"Container Up"| H["✅ Deploy Success"]
-    G -->|"Container Down"| I["❌ Deploy Failed<br/>(logs dumped)"]
+    C --> D["./backup-db.sh<br/>(Backup Database)"]
+    D --> E["./deploy.sh update<br/>(Pull & Restart)"]
+    E --> F{{"Health Check<br/>(5s delay)"}}
+    F -->|"Container Up"| G["✅ Deploy Success"]
+    F -->|"Container Down"| H["❌ Deploy Failed<br/>(logs dumped)"]
 
     style A fill:#229ED9,color:#fff
-    style H fill:#3FB950,color:#fff
-    style I fill:#F85149,color:#fff
+    style G fill:#3FB950,color:#fff
+    style H fill:#F85149,color:#fff
 ```
 
 **Required GitHub Secrets:**

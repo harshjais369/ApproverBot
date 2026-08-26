@@ -1,22 +1,19 @@
 FROM python:3.14-slim
 
+WORKDIR /app
+
 # Create a non-root user to run the app
 RUN addgroup --system botgroup && adduser --system --ingroup botgroup botuser
 
-WORKDIR /app
-
-# Install dependencies first (layer cache)
+# Install dependencies first (layer cache optimization)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source
-COPY . .
+# Create the persistent data directory and set permissions BEFORE copying code
+RUN mkdir -p /app/data && chown -R botuser:botgroup /app/data
 
-# Ensure there is no .env baked into the image
-RUN rm -f .env .env.example
-
-# Persistent data directory for SQLite
-RUN mkdir -p /app/data && chown botuser:botgroup /app/data
+# Copy application source and explicitly assign ownership to your non-root user
+COPY --chown=botuser:botgroup . .
 
 USER botuser
 
