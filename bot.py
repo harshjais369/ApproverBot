@@ -430,9 +430,10 @@ def handle_ban(call):
     try:
         bot.ban_chat_member(chat_id, user_id)
         bot.edit_message_text(
-            call.message.text + f"\n\n--- User {user_id} BANNED by admin ---",
+            call.message.html_text + f"\n\n--- User {user_id} BANNED by admin ---",
             call.message.chat.id,
             call.message.message_id,
+            parse_mode="HTML",
         )
     except Exception as e:
         bot.answer_callback_query(call.id, f"Error: {e}")
@@ -454,9 +455,10 @@ def handle_ban_both(call):
     if errors:
         bot.answer_callback_query(call.id, f"Partial: {'; '.join(errors)}")
     bot.edit_message_text(
-        call.message.text + f"\n\n--- Users {user1} & {user2} BANNED by admin ---",
+        call.message.html_text + f"\n\n--- Users {user1} &amp; {user2} BANNED by admin ---",
         call.message.chat.id,
         call.message.message_id,
+        parse_mode="HTML",
     )
 
 
@@ -487,9 +489,10 @@ def handle_false_positive(call):
     new_uid, matched_uid = int(parts[1]), int(parts[2])
     db.mark_false_positive(new_uid, matched_uid)
     bot.edit_message_text(
-        call.message.text + "\n\n--- FALSE POSITIVE marked by admin ---",
+        call.message.html_text + "\n\n--- FALSE POSITIVE marked by admin ---",
         call.message.chat.id,
         call.message.message_id,
+        parse_mode="HTML",
     )
 
 
