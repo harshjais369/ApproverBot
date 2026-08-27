@@ -504,13 +504,16 @@ def handle_approve_req(call):
         return
     parts = call.data.split(":")
     chat_id, user_id, flag_id = int(parts[1]), int(parts[2]), int(parts[3])
+    # Persist approval state BEFORE the Telegram API call so that the
+    # chat_member handler (which fires on join) already sees 'completed'
+    # and won't kick the user.
+    db.update_flag_action(flag_id, "approved")
+    db.mark_pending_completed_by_user(user_id, chat_id)
     try:
         bot.approve_chat_join_request(chat_id, user_id)
     except Exception:
-        pass  # May already be approved
+        pass  # May already be approved or declined
     _unrestrict_user(chat_id, user_id)
-    db.update_flag_action(flag_id, "approved")
-    db.mark_pending_completed_by_user(user_id, chat_id)
     _update_log_message_status(call.message, "Approved ✅", chat_id, user_id)
     bot.answer_callback_query(call.id, "User approved ✅")
     logger.info("Admin approved flagged user %s in chat %s (flag %s)", user_id, chat_id, flag_id)
